@@ -24,3 +24,17 @@ export type ChatMessage = {
   sticker?: string;
   time: string;
 };
+
+export type LearningSourceType = 'text' | 'document' | 'image' | 'screenshot' | 'sticker' | 'social';
+
+export type LearningSource = {
+  id: string;
+  exId: string;
+  type: LearningSourceType;
+  title: string;
+  localUri?: string;
+  rawText?: string;
+  summary: string;
+  status: 'pending' | 'learned' | 'failed';
+  createdAt: number;
+};

@@ -3,13 +3,15 @@ import { Platform } from 'react-native';
 import { getDatabase } from '@/lib/database/client';
 import { formatListTime, formatMessageTime } from '@/lib/time/format';
 
-import { ChatMessage, ExProfile, ExProfileDetail } from './types';
+import { ChatMessage, ExProfile, ExProfileDetail, LearningSource, LearningSourceType } from './types';
 import {
   addWebAssistantMessage,
+  addWebLearningSource,
   addWebUserMessage,
   createWebExProfile,
   getWebExProfile,
   getWebExProfiles,
+  getWebLearningSources,
   getWebMessages,
 } from './webFallback';
 
@@ -43,6 +45,27 @@ type CreateExProfileInput = {
   mood: string;
   name: string;
   temperature: number;
+};
+
+type AddLearningSourceInput = {
+  exId: string;
+  type: LearningSourceType;
+  title: string;
+  localUri?: string;
+  rawText?: string;
+  summary?: string;
+};
+
+type LearningSourceRow = {
+  id: string;
+  ex_id: string;
+  type: LearningSourceType;
+  title: string;
+  local_uri: string | null;
+  raw_text: string | null;
+  summary: string;
+  status: 'pending' | 'learned' | 'failed';
+  created_at: number;
 };
 
 export async function getExProfiles(): Promise<ExProfile[]> {
@@ -262,6 +285,75 @@ export async function getRecentMessagesForPrompt(exId: string, limit = 30) {
       sticker: row.sticker ?? undefined,
       time: formatMessageTime(row.created_at),
     }));
+}
+
+export async function addLearningSource(input: AddLearningSourceInput): Promise<LearningSource> {
+  if (Platform.OS === 'web') {
+    return addWebLearningSource(input);
+  }
+
+  const database = await getDatabase();
+  const now = Date.now();
+  const id = `source-${now.toString(36)}`;
+
+  await database.runAsync(
+    `INSERT INTO learning_sources
+      (id, ex_id, type, title, local_uri, raw_text, summary, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      input.exId,
+      input.type,
+      input.title,
+      input.localUri ?? null,
+      input.rawText ?? null,
+      input.summary ?? '',
+      'pending',
+      now,
+      now
+    ]
+  );
+
+  return {
+    createdAt: now,
+    exId: input.exId,
+    id,
+    localUri: input.localUri,
+    rawText: input.rawText,
+    status: 'pending',
+    summary: input.summary ?? '',
+    title: input.title,
+    type: input.type,
+  };
+}
+
+export async function getLearningSources(exId: string): Promise<LearningSource[]> {
+  if (Platform.OS === 'web') {
+    return getWebLearningSources(exId);
+  }
+
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<LearningSourceRow>(
+    `
+      SELECT id, ex_id, type, title, local_uri, raw_text, summary, status, created_at
+      FROM learning_sources
+      WHERE ex_id = ?
+      ORDER BY created_at DESC
+    `,
+    exId
+  );
+
+  return rows.map((row) => ({
+    createdAt: row.created_at,
+    exId: row.ex_id,
+    id: row.id,
+    localUri: row.local_uri ?? undefined,
+    rawText: row.raw_text ?? undefined,
+    status: row.status,
+    summary: row.summary,
+    title: row.title,
+    type: row.type,
+  }));
 }
 
 function isVisibleChatMessage(

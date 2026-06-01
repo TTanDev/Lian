@@ -1,4 +1,4 @@
-import { ChatMessage, ExProfileDetail } from './types';
+import { ChatMessage, ExProfileDetail, LearningSource } from './types';
 
 const webExProfiles: ExProfileDetail[] = [
   {
@@ -64,6 +64,8 @@ const webMessages: Record<string, ChatMessage[]> = {
   ],
 };
 
+const webLearningSources: Record<string, LearningSource[]> = {};
+
 export function getWebExProfiles() {
   return webExProfiles.map(({ persona, sharedMemories, speechStyle, triggers, ...profile }) => profile);
 }
@@ -101,8 +103,37 @@ export function createWebExProfile(input: {
 
   webExProfiles.unshift(profile);
   webMessages[id] = [];
+  webLearningSources[id] = [];
 
   return profile;
+}
+
+export function addWebLearningSource(input: {
+  exId: string;
+  type: LearningSource['type'];
+  title: string;
+  localUri?: string;
+  rawText?: string;
+  summary?: string;
+}): LearningSource {
+  const source: LearningSource = {
+    createdAt: Date.now(),
+    exId: input.exId,
+    id: `web-source-${Date.now().toString(36)}`,
+    localUri: input.localUri,
+    rawText: input.rawText,
+    status: 'pending',
+    summary: input.summary ?? '',
+    title: input.title,
+    type: input.type,
+  };
+
+  webLearningSources[input.exId] = [source, ...(webLearningSources[input.exId] ?? [])];
+  return source;
+}
+
+export function getWebLearningSources(exId: string) {
+  return webLearningSources[exId] ?? [];
 }
 
 export function addWebUserMessage(exId: string, content: string): ChatMessage {

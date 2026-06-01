@@ -1,10 +1,14 @@
 import { Link, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, FileText, Image, MessageSquareText, Sparkles, Sticker, Upload } from 'lucide-react-native';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
 
 import { GlassCard } from '@/components/GlassCard';
 import { Screen } from '@/components/Screen';
 import { useExProfile } from '@/features/exes/hooks';
+import { addLearningSource, getLearningSources } from '@/features/exes/repository';
+import { LearningSource, LearningSourceType } from '@/features/exes/types';
+import { pickDocumentSource, pickImageSource } from '@/features/learning/importers';
 import { palette } from '@/theme/palette';
 
 const sourceTypes = [
@@ -17,6 +21,73 @@ const sourceTypes = [
 export default function LearningScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data: ex, error, loading } = useExProfile(id);
+  const [sources, setSources] = useState<LearningSource[]>([]);
+  const [actionStatus, setActionStatus] = useState('资料会先保存在本机，之后再分批学习。');
+
+  useEffect(() => {
+    if (!id) {
+      return;
+    }
+
+    loadSources(id);
+  }, [id]);
+
+  async function loadSources(exId: string) {
+    const nextSources = await getLearningSources(exId);
+    setSources(nextSources);
+  }
+
+  async function handlePickDocument(type: LearningSourceType = 'document') {
+    if (!id) {
+      return;
+    }
+
+    try {
+      setActionStatus('正在选择文件...');
+      const picked = await pickDocumentSource(type);
+      if (!picked) {
+        setActionStatus('已取消导入。');
+        return;
+      }
+      await addLearningSource({
+        exId: id,
+        localUri: picked.localUri,
+        summary: '等待学习分析。',
+        title: picked.title,
+        type: picked.type,
+      });
+      await loadSources(id);
+      setActionStatus('文件已加入学习资料。');
+    } catch (caught) {
+      setActionStatus(caught instanceof Error ? caught.message : '导入失败');
+    }
+  }
+
+  async function handlePickImage(type: LearningSourceType = 'image') {
+    if (!id) {
+      return;
+    }
+
+    try {
+      setActionStatus('正在选择图片...');
+      const picked = await pickImageSource(type);
+      if (!picked) {
+        setActionStatus('已取消导入。');
+        return;
+      }
+      await addLearningSource({
+        exId: id,
+        localUri: picked.localUri,
+        summary: '等待多模态模型分析。',
+        title: picked.title,
+        type: picked.type,
+      });
+      await loadSources(id);
+      setActionStatus('图片已加入学习资料。');
+    } catch (caught) {
+      setActionStatus(caught instanceof Error ? caught.message : '导入失败');
+    }
+  }
 
   if (loading || !ex) {
     return (
@@ -47,24 +118,52 @@ export default function LearningScreen() {
           <Text style={styles.heroBody}>
             原始资料默认留在本地，学习时只分批发送必要片段和摘要给你配置的模型。
           </Text>
-          <Pressable style={styles.primaryAction}>
+          <Pressable onPress={() => handlePickDocument('document')} style={styles.primaryAction}>
             <Upload color={palette.text} size={18} />
-            <Text style={styles.primaryActionText}>添加资料</Text>
+            <Text style={styles.primaryActionText}>添加文件</Text>
           </Pressable>
+          <Text style={styles.statusText}>{actionStatus}</Text>
         </GlassCard>
 
         {sourceTypes.map((source) => {
           const Icon = source.icon;
           return (
-            <GlassCard key={source.title} style={styles.sourceCard}>
+            <Pressable
+              key={source.title}
+              onPress={() => {
+                if (source.title === '照片/截图') {
+                  handlePickImage('screenshot');
+                } else if (source.title === '表情包') {
+                  handlePickImage('sticker');
+                } else if (source.title === '聊天记录') {
+                  handlePickDocument('document');
+                } else {
+                  handlePickDocument('text');
+                }
+              }}
+            >
+              <GlassCard style={styles.sourceCard}>
               <Icon color={palette.accentSoft} size={21} />
               <View style={styles.sourceText}>
                 <Text style={styles.sourceTitle}>{source.title}</Text>
                 <Text style={styles.sourceBody}>{source.body}</Text>
               </View>
-            </GlassCard>
+              </GlassCard>
+            </Pressable>
           );
         })}
+
+        <Text style={styles.sectionLabel}>已导入资料</Text>
+        {sources.length === 0 ? (
+          <Text style={styles.emptyText}>还没有资料。先导入一点聊天记录、照片或表情包。</Text>
+        ) : null}
+        {sources.map((source) => (
+          <GlassCard key={source.id} style={styles.importedCard}>
+            <Text style={styles.importedTitle}>{source.title}</Text>
+            <Text style={styles.importedMeta}>{source.type} · {source.status}</Text>
+            <Text style={styles.importedBody}>{source.summary || '等待学习分析。'}</Text>
+          </GlassCard>
+        ))}
       </ScrollView>
     </Screen>
   );
@@ -136,6 +235,41 @@ const styles = StyleSheet.create({
     color: palette.text,
     fontSize: 14,
     fontWeight: '800',
+  },
+  statusText: {
+    color: palette.subtle,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  sectionLabel: {
+    color: palette.text,
+    fontSize: 16,
+    fontWeight: '800',
+    marginTop: 6,
+  },
+  emptyText: {
+    color: palette.muted,
+    fontSize: 13,
+    lineHeight: 20,
+    paddingHorizontal: 6,
+  },
+  importedCard: {
+    gap: 5,
+  },
+  importedTitle: {
+    color: palette.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  importedMeta: {
+    color: palette.accentSoft,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  importedBody: {
+    color: palette.subtle,
+    fontSize: 13,
+    lineHeight: 19,
   },
   sourceCard: {
     alignItems: 'flex-start',

@@ -33,6 +33,11 @@ export async function testOpenAIConnection(settings: ApiSettings): Promise<strin
   return response || 'OK';
 }
 
+export async function generateChatReply(settings: ApiSettings, messages: ChatMessage[]) {
+  validateSettings(settings);
+  return createChatCompletion(settings, messages);
+}
+
 async function createChatCompletion(settings: ApiSettings, messages: ChatMessage[]) {
   const response = await fetch(`${settings.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
     body: JSON.stringify({

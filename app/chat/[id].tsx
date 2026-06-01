@@ -7,7 +7,14 @@ import { ChatBubble } from '@/components/ChatBubble';
 import { GlassCard } from '@/components/GlassCard';
 import { Screen } from '@/components/Screen';
 import { useChatMessages, useExProfile } from '@/features/exes/hooks';
-import { addUserMessage } from '@/features/exes/repository';
+import {
+  addAssistantMessage,
+  addUserMessage,
+  getRecentMessagesForPrompt,
+} from '@/features/exes/repository';
+import { buildChatPrompt } from '@/features/chat/prompt';
+import { generateChatReply } from '@/lib/openai/client';
+import { getApiSettings } from '@/lib/settings/apiSettings';
 import { palette } from '@/theme/palette';
 
 export default function ChatScreen() {
@@ -21,6 +28,7 @@ export default function ChatScreen() {
   } = useChatMessages(id);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   async function handleSend() {
     const content = draft.trim();
@@ -28,11 +36,29 @@ export default function ChatScreen() {
       return;
     }
 
+    const currentProfile = ex;
+    if (!currentProfile) {
+      setSendError('角色还没有加载完成');
+      return;
+    }
+
     try {
       setSending(true);
+      setSendError(null);
       setDraft('');
       await addUserMessage(id, content);
       reloadMessages();
+      const [profile, settings, recentMessages] = await Promise.all([
+        Promise.resolve(currentProfile),
+        getApiSettings(),
+        getRecentMessagesForPrompt(id),
+      ]);
+      const prompt = buildChatPrompt(profile, recentMessages);
+      const reply = await generateChatReply(settings, prompt);
+      await addAssistantMessage(id, reply || '我不知道该怎么回你。');
+      reloadMessages();
+    } catch (caught) {
+      setSendError(caught instanceof Error ? caught.message : '发送失败');
     } finally {
       setSending(false);
     }
@@ -77,6 +103,8 @@ export default function ChatScreen() {
         {messages.map((message) => (
           <ChatBubble key={message.id} message={message} />
         ))}
+        {sending ? <Text style={styles.stateText}>她正在想怎么回...</Text> : null}
+        {sendError ? <Text style={styles.errorText}>{sendError}</Text> : null}
         <GlassCard style={styles.proactiveHint}>
           <Sparkles color={palette.accent} size={16} />
           <Text style={styles.hintText}>主动消息队列会根据未回复时间、情绪和免打扰时间生成。</Text>
@@ -121,6 +149,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
     padding: 18,
+  },
+  errorText: {
+    color: palette.accentSoft,
+    fontSize: 13,
+    lineHeight: 19,
+    paddingHorizontal: 18,
   },
   iconButton: {
     alignItems: 'center',

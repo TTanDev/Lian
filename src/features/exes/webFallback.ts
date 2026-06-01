@@ -128,3 +128,33 @@ export function addWebUserMessage(exId: string, content: string): ChatMessage {
 
   return message;
 }
+
+export function addWebAssistantMessage(
+  exId: string,
+  content: string,
+  options?: { delayNote?: string; sticker?: string }
+): ChatMessage {
+  const now = new Date();
+  const message: ChatMessage = {
+    content,
+    delayNote: options?.delayNote,
+    id: `web-msg-${Date.now().toString(36)}`,
+    role: 'assistant',
+    sticker: options?.sticker,
+    time: now.toLocaleTimeString('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }),
+  };
+
+  webMessages[exId] = [...(webMessages[exId] ?? []), message];
+
+  const profile = webExProfiles.find((item) => item.id === exId);
+  if (profile) {
+    profile.lastMessage = content;
+    profile.lastMessageAt = message.time;
+  }
+
+  return message;
+}

@@ -5,6 +5,7 @@ import { formatListTime, formatMessageTime } from '@/lib/time/format';
 
 import { ChatMessage, ExProfile, ExProfileDetail } from './types';
 import {
+  addWebAssistantMessage,
   addWebUserMessage,
   createWebExProfile,
   getWebExProfile,
@@ -196,6 +197,71 @@ export async function addUserMessage(exId: string, content: string): Promise<Cha
     role: 'user',
     time: formatMessageTime(now),
   };
+}
+
+export async function addAssistantMessage(
+  exId: string,
+  content: string,
+  options?: { delayNote?: string; sticker?: string }
+): Promise<ChatMessage> {
+  if (Platform.OS === 'web') {
+    return addWebAssistantMessage(exId, content, options);
+  }
+
+  const database = await getDatabase();
+  const now = Date.now();
+  const id = `msg-${now.toString(36)}`;
+
+  await database.withTransactionAsync(async () => {
+    await database.runAsync(
+      `INSERT INTO messages (id, ex_id, role, content, created_at, source, delay_note, sticker)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, exId, 'assistant', content, now, 'normal', options?.delayNote ?? null, options?.sticker ?? null]
+    );
+    await database.runAsync(
+      'UPDATE ex_profiles SET updated_at = ? WHERE id = ?',
+      [now, exId]
+    );
+  });
+
+  return {
+    content,
+    delayNote: options?.delayNote,
+    id,
+    role: 'assistant',
+    sticker: options?.sticker,
+    time: formatMessageTime(now),
+  };
+}
+
+export async function getRecentMessagesForPrompt(exId: string, limit = 30) {
+  if (Platform.OS === 'web') {
+    return getWebMessages(exId).slice(-limit);
+  }
+
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<MessageRow>(
+    `
+      SELECT id, role, content, created_at, delay_note, sticker
+      FROM messages
+      WHERE ex_id = ? AND role IN ('assistant', 'user')
+      ORDER BY created_at DESC
+      LIMIT ?
+    `,
+    [exId, limit]
+  );
+
+  return rows
+    .reverse()
+    .filter(isVisibleChatMessage)
+    .map((row) => ({
+      content: row.content,
+      delayNote: row.delay_note ?? undefined,
+      id: row.id,
+      role: row.role,
+      sticker: row.sticker ?? undefined,
+      time: formatMessageTime(row.created_at),
+    }));
 }
 
 function isVisibleChatMessage(

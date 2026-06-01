@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { GlassCard } from '@/components/GlassCard';
 import { Screen } from '@/components/Screen';
-import { findExById } from '@/features/exes/sampleData';
+import { useExProfile } from '@/features/exes/hooks';
 import { palette } from '@/theme/palette';
 
 const sections = [
@@ -15,7 +15,15 @@ const sections = [
 
 export default function ExDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const ex = findExById(id);
+  const { data: ex, error, loading } = useExProfile(id);
+
+  if (loading || !ex) {
+    return (
+      <Screen>
+        <Text style={styles.stateText}>{error ?? '正在读取角色...'}</Text>
+      </Screen>
+    );
+  }
 
   return (
     <Screen>
@@ -75,6 +83,15 @@ export default function ExDetailScreen() {
             </GlassCard>
           );
         })}
+
+        <GlassCard style={styles.sectionCard}>
+          <Brain color={palette.accentSoft} size={20} />
+          <View style={styles.sectionText}>
+            <Text style={styles.sectionTitle}>当前 Skill 摘要</Text>
+            <Text style={styles.sectionBody}>{ex.persona}</Text>
+            <Text style={styles.sectionBody}>{ex.sharedMemories}</Text>
+          </View>
+        </GlassCard>
       </ScrollView>
     </Screen>
   );
@@ -86,6 +103,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: 18,
+  },
+  stateText: {
+    color: palette.subtle,
+    fontSize: 14,
+    lineHeight: 21,
+    padding: 18,
   },
   iconButton: {
     alignItems: 'center',

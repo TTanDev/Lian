@@ -1,0 +1,132 @@
+import { getDatabase } from '@/lib/database/client';
+import { formatListTime, formatMessageTime } from '@/lib/time/format';
+
+import { ChatMessage, ExProfile, ExProfileDetail } from './types';
+
+type ExProfileRow = {
+  id: string;
+  name: string;
+  avatar: string;
+  description: string;
+  mood: string;
+  temperature: number;
+  persona: string;
+  shared_memories: string;
+  speech_style: string;
+  triggers: string;
+  last_message: string | null;
+  last_message_at: number | null;
+};
+
+type MessageRow = {
+  id: string;
+  role: 'assistant' | 'user' | 'system' | 'imported';
+  content: string;
+  created_at: number;
+  delay_note: string | null;
+  sticker: string | null;
+};
+
+export async function getExProfiles(): Promise<ExProfile[]> {
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<ExProfileRow>(`
+    SELECT
+      ex_profiles.*,
+      (
+        SELECT content FROM messages
+        WHERE messages.ex_id = ex_profiles.id
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) AS last_message,
+      (
+        SELECT created_at FROM messages
+        WHERE messages.ex_id = ex_profiles.id
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) AS last_message_at
+    FROM ex_profiles
+    ORDER BY updated_at DESC
+  `);
+
+  return rows.map(mapExProfileRow);
+}
+
+export async function getExProfile(id: string): Promise<ExProfileDetail | null> {
+  const database = await getDatabase();
+  const row = await database.getFirstAsync<ExProfileRow>(
+    `
+      SELECT
+        ex_profiles.*,
+        (
+          SELECT content FROM messages
+          WHERE messages.ex_id = ex_profiles.id
+          ORDER BY created_at DESC
+          LIMIT 1
+        ) AS last_message,
+        (
+          SELECT created_at FROM messages
+          WHERE messages.ex_id = ex_profiles.id
+          ORDER BY created_at DESC
+          LIMIT 1
+        ) AS last_message_at
+      FROM ex_profiles
+      WHERE id = ?
+    `,
+    id
+  );
+
+  return row ? mapExProfileDetailRow(row) : null;
+}
+
+export async function getMessages(exId: string): Promise<ChatMessage[]> {
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<MessageRow>(
+    `
+      SELECT id, role, content, created_at, delay_note, sticker
+      FROM messages
+      WHERE ex_id = ?
+      ORDER BY created_at ASC
+    `,
+    exId
+  );
+
+  return rows
+    .filter(isVisibleChatMessage)
+    .map((row) => ({
+      content: row.content,
+      delayNote: row.delay_note ?? undefined,
+      id: row.id,
+      role: row.role,
+      sticker: row.sticker ?? undefined,
+      time: formatMessageTime(row.created_at),
+    }));
+}
+
+function isVisibleChatMessage(
+  row: MessageRow
+): row is MessageRow & { role: 'assistant' | 'user' } {
+  return row.role === 'assistant' || row.role === 'user';
+}
+
+function mapExProfileRow(row: ExProfileRow): ExProfile {
+  return {
+    avatar: row.avatar,
+    description: row.description,
+    id: row.id,
+    lastMessage: row.last_message ?? '还没有消息',
+    lastMessageAt: formatListTime(row.last_message_at),
+    mood: row.mood,
+    name: row.name,
+    temperature: row.temperature,
+  };
+}
+
+function mapExProfileDetailRow(row: ExProfileRow): ExProfileDetail {
+  return {
+    ...mapExProfileRow(row),
+    persona: row.persona,
+    sharedMemories: row.shared_memories,
+    speechStyle: row.speech_style,
+    triggers: row.triggers,
+  };
+}

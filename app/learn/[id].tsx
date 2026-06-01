@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { GlassCard } from '@/components/GlassCard';
 import { Screen } from '@/components/Screen';
-import { findExById } from '@/features/exes/sampleData';
+import { useExProfile } from '@/features/exes/hooks';
 import { palette } from '@/theme/palette';
 
 const sourceTypes = [
@@ -16,7 +16,15 @@ const sourceTypes = [
 
 export default function LearningScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const ex = findExById(id);
+  const { data: ex, error, loading } = useExProfile(id);
+
+  if (loading || !ex) {
+    return (
+      <Screen>
+        <Text style={styles.stateText}>{error ?? '正在读取资料库...'}</Text>
+      </Screen>
+    );
+  }
 
   return (
     <Screen>
@@ -68,6 +76,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 14,
     marginBottom: 18,
+  },
+  stateText: {
+    color: palette.subtle,
+    fontSize: 14,
+    lineHeight: 21,
+    padding: 18,
   },
   iconButton: {
     alignItems: 'center',

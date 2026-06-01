@@ -5,12 +5,21 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { ChatBubble } from '@/components/ChatBubble';
 import { GlassCard } from '@/components/GlassCard';
 import { Screen } from '@/components/Screen';
-import { findExById, sampleMessages } from '@/features/exes/sampleData';
+import { useChatMessages, useExProfile } from '@/features/exes/hooks';
 import { palette } from '@/theme/palette';
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const ex = findExById(id);
+  const { data: ex, error: profileError, loading: profileLoading } = useExProfile(id);
+  const { data: messages, error: messagesError, loading: messagesLoading } = useChatMessages(id);
+
+  if (profileLoading || !ex) {
+    return (
+      <Screen>
+        <Text style={styles.stateText}>{profileError ?? '正在读取角色...'}</Text>
+      </Screen>
+    );
+  }
 
   return (
     <Screen>
@@ -38,7 +47,9 @@ export default function ChatScreen() {
 
       <ScrollView contentContainerStyle={styles.messages} showsVerticalScrollIndicator={false}>
         <Text style={styles.dayLabel}>今天</Text>
-        {sampleMessages.map((message) => (
+        {messagesLoading ? <Text style={styles.stateText}>正在读取聊天记录...</Text> : null}
+        {messagesError ? <Text style={styles.stateText}>{messagesError}</Text> : null}
+        {messages.map((message) => (
           <ChatBubble key={message.id} message={message} />
         ))}
         <GlassCard style={styles.proactiveHint}>
@@ -73,6 +84,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginBottom: 14,
+  },
+  stateText: {
+    color: palette.subtle,
+    fontSize: 14,
+    lineHeight: 21,
+    padding: 18,
   },
   iconButton: {
     alignItems: 'center',

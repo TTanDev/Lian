@@ -4,10 +4,12 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { GlassCard } from '@/components/GlassCard';
 import { Screen } from '@/components/Screen';
-import { sampleExes } from '@/features/exes/sampleData';
+import { useExProfiles } from '@/features/exes/hooks';
 import { palette } from '@/theme/palette';
 
 export default function ExListScreen() {
+  const { data: exProfiles, error, loading } = useExProfiles();
+
   return (
     <Screen>
       <View style={styles.header}>
@@ -28,7 +30,12 @@ export default function ExListScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-        {sampleExes.map((ex) => (
+        {loading ? <Text style={styles.stateText}>正在读取本地数据...</Text> : null}
+        {error ? <Text style={styles.stateText}>{error}</Text> : null}
+        {!loading && !error && exProfiles.length === 0 ? (
+          <Text style={styles.stateText}>还没有前任角色，点右上角添加一个。</Text>
+        ) : null}
+        {exProfiles.map((ex) => (
           <Link key={ex.id} href={`/chat/${ex.id}`} asChild>
             <Pressable>
               <GlassCard style={styles.card}>
@@ -66,6 +73,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: 22,
+  },
+  stateText: {
+    color: palette.subtle,
+    fontSize: 14,
+    lineHeight: 21,
+    paddingHorizontal: 4,
   },
   kicker: {
     color: palette.accent,

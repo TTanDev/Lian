@@ -9,6 +9,13 @@ export type ExProfile = {
   temperature: number;
 };
 
+export type ExProfileDetail = ExProfile & {
+  persona: string;
+  sharedMemories: string;
+  speechStyle: string;
+  triggers: string;
+};
+
 export type ChatMessage = {
   id: string;
   content: string;

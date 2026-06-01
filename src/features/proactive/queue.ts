@@ -6,8 +6,11 @@ import {
   setProactiveNotificationId,
 } from '@/features/exes/repository';
 import { ExProfileDetail } from '@/features/exes/types';
+import { generateChatReply } from '@/lib/openai/client';
+import { getApiSettings } from '@/lib/settings/apiSettings';
 
 import { ensureNotificationPermissions, scheduleProactiveNotification } from './notifications';
+import { buildProactivePrompt } from './prompt';
 
 export async function letHerSaySomethingNow(profile: ExProfileDetail) {
   const content = await buildProactiveContent(profile);
@@ -31,7 +34,7 @@ export async function scheduleUpcomingProactiveMessages(profile: ExProfileDetail
   const dates = pickUpcomingDates(3 - existing.length);
 
   for (const scheduledAt of dates) {
-    const content = await buildProactiveContent(profile);
+    const content = await buildScheduledProactiveContent(profile, scheduledAt);
     const message = await createProactiveMessage(profile.id, content, scheduledAt);
     const notificationId = await scheduleProactiveNotification(message, profile.name);
     await setProactiveNotificationId(message.id, notificationId);
@@ -40,9 +43,46 @@ export async function scheduleUpcomingProactiveMessages(profile: ExProfileDetail
   return existing.length + dates.length;
 }
 
+async function buildScheduledProactiveContent(profile: ExProfileDetail, scheduledAt: number) {
+  const recentMessages = await getRecentMessagesForPrompt(profile.id, 20);
+  const modelGenerated = await tryBuildModelProactiveContent(profile, recentMessages, scheduledAt);
+  if (modelGenerated) {
+    return modelGenerated;
+  }
+
+  return buildFallbackProactiveContent(profile, recentMessages);
+}
+
 async function buildProactiveContent(profile: ExProfileDetail) {
-  const recentMessages = await getRecentMessagesForPrompt(profile.id, 1);
-  const lastMessage = recentMessages[0];
+  const recentMessages = await getRecentMessagesForPrompt(profile.id, 20);
+  const modelGenerated = await tryBuildModelProactiveContent(profile, recentMessages);
+  if (modelGenerated) {
+    return modelGenerated;
+  }
+
+  return buildFallbackProactiveContent(profile, recentMessages);
+}
+
+async function tryBuildModelProactiveContent(
+  profile: ExProfileDetail,
+  recentMessages: Awaited<ReturnType<typeof getRecentMessagesForPrompt>>,
+  scheduledAt?: number
+) {
+  try {
+    const settings = await getApiSettings();
+    const prompt = buildProactivePrompt(profile, recentMessages, { scheduledAt });
+    const reply = await generateChatReply(settings, prompt);
+    return cleanupProactiveReply(reply);
+  } catch {
+    return null;
+  }
+}
+
+function buildFallbackProactiveContent(
+  profile: ExProfileDetail,
+  recentMessages: Awaited<ReturnType<typeof getRecentMessagesForPrompt>>
+) {
+  const lastMessage = recentMessages.at(-1);
   const isWaitingForUser = lastMessage?.role === 'assistant';
 
   if (isWaitingForUser && profile.temperature < 55) {
@@ -62,6 +102,19 @@ async function buildProactiveContent(profile: ExProfileDetail) {
   }
 
   return '你今天好像很安静。';
+}
+
+function cleanupProactiveReply(reply: string) {
+  const cleaned = reply
+    .trim()
+    .replace(/^["“”]+|["“”]+$/g, '')
+    .replace(/\n+/g, ' ');
+
+  if (!cleaned) {
+    return null;
+  }
+
+  return cleaned.length > 120 ? `${cleaned.slice(0, 118)}...` : cleaned;
 }
 
 function pickUpcomingDates(count: number) {

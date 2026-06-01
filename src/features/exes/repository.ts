@@ -4,7 +4,13 @@ import { getDatabase } from '@/lib/database/client';
 import { formatListTime, formatMessageTime } from '@/lib/time/format';
 
 import { ChatMessage, ExProfile, ExProfileDetail } from './types';
-import { createWebExProfile, getWebExProfile, getWebExProfiles, getWebMessages } from './webFallback';
+import {
+  addWebUserMessage,
+  createWebExProfile,
+  getWebExProfile,
+  getWebExProfiles,
+  getWebMessages,
+} from './webFallback';
 
 type ExProfileRow = {
   id: string;
@@ -161,6 +167,35 @@ export async function createExProfile(input: CreateExProfileInput): Promise<ExPr
   }
 
   return profile;
+}
+
+export async function addUserMessage(exId: string, content: string): Promise<ChatMessage> {
+  if (Platform.OS === 'web') {
+    return addWebUserMessage(exId, content);
+  }
+
+  const database = await getDatabase();
+  const now = Date.now();
+  const id = `msg-${now.toString(36)}`;
+
+  await database.withTransactionAsync(async () => {
+    await database.runAsync(
+      `INSERT INTO messages (id, ex_id, role, content, created_at, source)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [id, exId, 'user', content, now, 'normal']
+    );
+    await database.runAsync(
+      'UPDATE ex_profiles SET updated_at = ? WHERE id = ?',
+      [now, exId]
+    );
+  });
+
+  return {
+    content,
+    id,
+    role: 'user',
+    time: formatMessageTime(now),
+  };
 }
 
 function isVisibleChatMessage(

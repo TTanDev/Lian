@@ -104,3 +104,27 @@ export function createWebExProfile(input: {
 
   return profile;
 }
+
+export function addWebUserMessage(exId: string, content: string): ChatMessage {
+  const now = new Date();
+  const message: ChatMessage = {
+    content,
+    id: `web-msg-${Date.now().toString(36)}`,
+    role: 'user',
+    time: now.toLocaleTimeString('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }),
+  };
+
+  webMessages[exId] = [...(webMessages[exId] ?? []), message];
+
+  const profile = webExProfiles.find((item) => item.id === exId);
+  if (profile) {
+    profile.lastMessage = content;
+    profile.lastMessageAt = message.time;
+  }
+
+  return message;
+}

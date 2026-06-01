@@ -1,17 +1,42 @@
 import { Link, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Image, Info, Mic, Send, Sparkles } from 'lucide-react-native';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useState } from 'react';
 
 import { ChatBubble } from '@/components/ChatBubble';
 import { GlassCard } from '@/components/GlassCard';
 import { Screen } from '@/components/Screen';
 import { useChatMessages, useExProfile } from '@/features/exes/hooks';
+import { addUserMessage } from '@/features/exes/repository';
 import { palette } from '@/theme/palette';
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data: ex, error: profileError, loading: profileLoading } = useExProfile(id);
-  const { data: messages, error: messagesError, loading: messagesLoading } = useChatMessages(id);
+  const {
+    data: messages,
+    error: messagesError,
+    loading: messagesLoading,
+    reload: reloadMessages,
+  } = useChatMessages(id);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+
+  async function handleSend() {
+    const content = draft.trim();
+    if (!id || !content || sending) {
+      return;
+    }
+
+    try {
+      setSending(true);
+      setDraft('');
+      await addUserMessage(id, content);
+      reloadMessages();
+    } finally {
+      setSending(false);
+    }
+  }
 
   if (profileLoading || !ex) {
     return (
@@ -63,14 +88,20 @@ export default function ChatScreen() {
           <Image color={palette.subtle} size={20} />
         </Pressable>
         <TextInput
+          onChangeText={setDraft}
           placeholder="说点什么..."
           placeholderTextColor={palette.muted}
           style={styles.input}
+          value={draft}
         />
         <Pressable style={styles.toolButton}>
           <Mic color={palette.subtle} size={20} />
         </Pressable>
-        <Pressable style={styles.sendButton}>
+        <Pressable
+          disabled={!draft.trim() || sending}
+          onPress={handleSend}
+          style={[styles.sendButton, (!draft.trim() || sending) && styles.sendButtonDisabled]}
+        >
           <Send color={palette.text} size={19} />
         </Pressable>
       </GlassCard>
@@ -179,5 +210,8 @@ const styles = StyleSheet.create({
     height: 36,
     justifyContent: 'center',
     width: 36,
+  },
+  sendButtonDisabled: {
+    opacity: 0.45,
   },
 });

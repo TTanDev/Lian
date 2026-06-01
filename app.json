@@ -28,6 +28,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-notifications",
       "expo-sqlite",
       "expo-secure-store"
     ]

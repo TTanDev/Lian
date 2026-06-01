@@ -1,0 +1,66 @@
+name: Build unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Prebuild iOS project
+        run: npx expo prebuild --platform ios --clean --non-interactive
+
+      - name: Install CocoaPods
+        working-directory: ios
+        run: pod install
+
+      - name: Build unsigned app
+        run: |
+          set -euo pipefail
+          WORKSPACE="$(find ios -maxdepth 1 -name '*.xcworkspace' | head -n 1)"
+          if [ -z "${WORKSPACE}" ]; then
+            echo "No Xcode workspace found"
+            exit 1
+          fi
+          APP_SCHEME="$(xcodebuild -list -json -workspace "${WORKSPACE}" | python3 -c "import json,sys; data=json.load(sys.stdin); print(data['workspace']['schemes'][0])")"
+          xcodebuild \
+            -workspace "${WORKSPACE}" \
+            -scheme "${APP_SCHEME}" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find build/DerivedData/Build/Products/Release-iphoneos -name '*.app' -maxdepth 1 | head -n 1)"
+          if [ -z "${APP_PATH}" ]; then
+            echo "No .app found"
+            exit 1
+          fi
+          rm -rf Payload unsigned-ipa
+          mkdir -p Payload unsigned-ipa
+          cp -R "${APP_PATH}" Payload/
+          /usr/bin/zip -qry unsigned-ipa/Lian-unsigned.ipa Payload
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lian-unsigned-ipa
+          path: unsigned-ipa/Lian-unsigned.ipa

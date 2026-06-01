@@ -1,7 +1,10 @@
+import { Platform } from 'react-native';
+
 import { getDatabase } from '@/lib/database/client';
 import { formatListTime, formatMessageTime } from '@/lib/time/format';
 
 import { ChatMessage, ExProfile, ExProfileDetail } from './types';
+import { getWebExProfile, getWebExProfiles, getWebMessages } from './webFallback';
 
 type ExProfileRow = {
   id: string;
@@ -28,6 +31,10 @@ type MessageRow = {
 };
 
 export async function getExProfiles(): Promise<ExProfile[]> {
+  if (Platform.OS === 'web') {
+    return getWebExProfiles();
+  }
+
   const database = await getDatabase();
   const rows = await database.getAllAsync<ExProfileRow>(`
     SELECT
@@ -52,6 +59,10 @@ export async function getExProfiles(): Promise<ExProfile[]> {
 }
 
 export async function getExProfile(id: string): Promise<ExProfileDetail | null> {
+  if (Platform.OS === 'web') {
+    return getWebExProfile(id);
+  }
+
   const database = await getDatabase();
   const row = await database.getFirstAsync<ExProfileRow>(
     `
@@ -79,6 +90,10 @@ export async function getExProfile(id: string): Promise<ExProfileDetail | null> 
 }
 
 export async function getMessages(exId: string): Promise<ChatMessage[]> {
+  if (Platform.OS === 'web') {
+    return getWebMessages(exId);
+  }
+
   const database = await getDatabase();
   const rows = await database.getAllAsync<MessageRow>(
     `

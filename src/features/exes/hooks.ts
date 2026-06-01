@@ -29,7 +29,7 @@ export function useExProfiles(): AsyncState<ExProfile[]> {
         }
       } catch (caught) {
         if (!cancelled) {
-          setError(caught instanceof Error ? caught.message : '读取前任列表失败');
+          setError(caught instanceof Error ? caught.message : '读取她的列表失败');
         }
       } finally {
         if (!cancelled) {

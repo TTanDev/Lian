@@ -15,7 +15,7 @@ export default function ExListScreen() {
       <View style={styles.header}>
         <View>
           <Text style={styles.kicker}>恋</Text>
-          <Text style={styles.title}>前任</Text>
+          <Text style={styles.title}>她</Text>
         </View>
         <View style={styles.headerActions}>
           <Link href="/settings" asChild>
@@ -33,7 +33,7 @@ export default function ExListScreen() {
         {loading ? <Text style={styles.stateText}>正在读取本地数据...</Text> : null}
         {error ? <Text style={styles.stateText}>{error}</Text> : null}
         {!loading && !error && exProfiles.length === 0 ? (
-          <Text style={styles.stateText}>还没有前任角色，点右上角添加一个。</Text>
+          <Text style={styles.stateText}>还没有添加她，点右上角添加一个。</Text>
         ) : null}
         {exProfiles.map((ex) => (
           <Link key={ex.id} href={`/chat/${ex.id}`} asChild>

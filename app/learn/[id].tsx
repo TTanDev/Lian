@@ -43,7 +43,7 @@ export default function LearningScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <GlassCard style={styles.hero}>
           <Sparkles color={palette.accent} size={24} />
-          <Text style={styles.heroTitle}>把碎片资料变成前任 Skill 档案</Text>
+          <Text style={styles.heroTitle}>把碎片资料变成她的 Skill 档案</Text>
           <Text style={styles.heroBody}>
             原始资料默认留在本地，学习时只分批发送必要片段和摘要给你配置的模型。
           </Text>

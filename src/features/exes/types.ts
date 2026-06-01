@@ -38,3 +38,14 @@ export type LearningSource = {
   status: 'pending' | 'learned' | 'failed';
   createdAt: number;
 };
+
+export type ProactiveMessage = {
+  id: string;
+  exId: string;
+  content: string;
+  scheduledAt: number;
+  deliveredAt?: number;
+  notificationId?: string;
+  status: 'scheduled' | 'delivered' | 'cancelled';
+  createdAt: number;
+};

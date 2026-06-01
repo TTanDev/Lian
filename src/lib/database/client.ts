@@ -94,6 +94,7 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase) {
       content TEXT NOT NULL,
       scheduled_at INTEGER NOT NULL,
       delivered_at INTEGER,
+      notification_id TEXT,
       status TEXT NOT NULL DEFAULT 'scheduled',
       created_at INTEGER NOT NULL,
       FOREIGN KEY (ex_id) REFERENCES ex_profiles(id) ON DELETE CASCADE
@@ -106,12 +107,28 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase) {
     );
   `);
 
+  await ensureColumn(database, 'proactive_messages', 'notification_id', 'TEXT');
+
   const profileCount = await database.getFirstAsync<{ count: number }>(
     'SELECT COUNT(*) as count FROM ex_profiles'
   );
 
   if (!profileCount?.count) {
     await seedDatabase(database);
+  }
+}
+
+async function ensureColumn(
+  database: SQLite.SQLiteDatabase,
+  tableName: string,
+  columnName: string,
+  columnType: string
+) {
+  const columns = await database.getAllAsync<{ name: string }>(`PRAGMA table_info(${tableName})`);
+  const exists = columns.some((column) => column.name === columnName);
+
+  if (!exists) {
+    await database.execAsync(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnType}`);
   }
 }
 

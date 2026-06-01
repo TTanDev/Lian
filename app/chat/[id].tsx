@@ -13,6 +13,10 @@ import {
   getRecentMessagesForPrompt,
 } from '@/features/exes/repository';
 import { buildChatPrompt } from '@/features/chat/prompt';
+import {
+  letHerSaySomethingNow,
+  scheduleUpcomingProactiveMessages,
+} from '@/features/proactive/queue';
 import { generateChatReply } from '@/lib/openai/client';
 import { getApiSettings } from '@/lib/settings/apiSettings';
 import { palette } from '@/theme/palette';
@@ -29,6 +33,7 @@ export default function ChatScreen() {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [proactiveStatus, setProactiveStatus] = useState('主动消息队列会根据未回复时间、情绪和免打扰时间生成。');
 
   async function handleSend() {
     const content = draft.trim();
@@ -61,6 +66,35 @@ export default function ChatScreen() {
       setSendError(caught instanceof Error ? caught.message : '发送失败');
     } finally {
       setSending(false);
+    }
+  }
+
+  async function handleManualProactive() {
+    if (!ex) {
+      return;
+    }
+
+    try {
+      setProactiveStatus('她正在想要不要主动说点什么...');
+      await letHerSaySomethingNow(ex);
+      reloadMessages();
+      setProactiveStatus('她主动发了一句。');
+    } catch (caught) {
+      setProactiveStatus(caught instanceof Error ? caught.message : '主动消息失败');
+    }
+  }
+
+  async function handleScheduleProactive() {
+    if (!ex) {
+      return;
+    }
+
+    try {
+      setProactiveStatus('正在安排未来主动消息...');
+      const count = await scheduleUpcomingProactiveMessages(ex);
+      setProactiveStatus(`已安排 ${count} 条未来主动消息。`);
+    } catch (caught) {
+      setProactiveStatus(caught instanceof Error ? caught.message : '安排主动消息失败');
     }
   }
 
@@ -107,7 +141,17 @@ export default function ChatScreen() {
         {sendError ? <Text style={styles.errorText}>{sendError}</Text> : null}
         <GlassCard style={styles.proactiveHint}>
           <Sparkles color={palette.accent} size={16} />
-          <Text style={styles.hintText}>主动消息队列会根据未回复时间、情绪和免打扰时间生成。</Text>
+          <View style={styles.proactiveBody}>
+            <Text style={styles.hintText}>{proactiveStatus}</Text>
+            <View style={styles.proactiveActions}>
+              <Pressable onPress={handleManualProactive} style={styles.proactiveButton}>
+                <Text style={styles.proactiveButtonText}>让她说一句</Text>
+              </Pressable>
+              <Pressable onPress={handleScheduleProactive} style={styles.proactiveButton}>
+                <Text style={styles.proactiveButtonText}>安排未来消息</Text>
+              </Pressable>
+            </View>
+          </View>
         </GlassCard>
       </ScrollView>
 
@@ -216,6 +260,28 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 12,
     lineHeight: 18,
+  },
+  proactiveBody: {
+    flex: 1,
+    gap: 9,
+  },
+  proactiveActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  proactiveButton: {
+    backgroundColor: palette.input,
+    borderColor: palette.stroke,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  proactiveButtonText: {
+    color: palette.text,
+    fontSize: 12,
+    fontWeight: '800',
   },
   composer: {
     alignItems: 'center',

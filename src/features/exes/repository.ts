@@ -3,16 +3,27 @@ import { Platform } from 'react-native';
 import { getDatabase } from '@/lib/database/client';
 import { formatListTime, formatMessageTime } from '@/lib/time/format';
 
-import { ChatMessage, ExProfile, ExProfileDetail, LearningSource, LearningSourceType } from './types';
+import {
+  ChatMessage,
+  ExProfile,
+  ExProfileDetail,
+  LearningSource,
+  LearningSourceType,
+  ProactiveMessage,
+} from './types';
 import {
   addWebAssistantMessage,
   addWebLearningSource,
   addWebUserMessage,
+  createWebProactiveMessage,
   createWebExProfile,
+  deliverWebProactiveMessage,
   getWebExProfile,
   getWebExProfiles,
   getWebLearningSources,
   getWebMessages,
+  getWebScheduledProactiveMessages,
+  setWebProactiveNotificationId,
   updateWebSkillProfile,
 } from './webFallback';
 
@@ -66,6 +77,17 @@ type LearningSourceRow = {
   raw_text: string | null;
   summary: string;
   status: 'pending' | 'learned' | 'failed';
+  created_at: number;
+};
+
+type ProactiveMessageRow = {
+  id: string;
+  ex_id: string;
+  content: string;
+  scheduled_at: number;
+  delivered_at: number | null;
+  notification_id: string | null;
+  status: 'scheduled' | 'delivered' | 'cancelled';
   created_at: number;
 };
 
@@ -383,6 +405,108 @@ export async function updateSkillProfile(
   );
 }
 
+export async function createProactiveMessage(
+  exId: string,
+  content: string,
+  scheduledAt: number
+): Promise<ProactiveMessage> {
+  if (Platform.OS === 'web') {
+    return createWebProactiveMessage(exId, content, scheduledAt);
+  }
+
+  const database = await getDatabase();
+  const now = Date.now();
+  const id = `proactive-${now.toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+
+  await database.runAsync(
+    `INSERT INTO proactive_messages
+      (id, ex_id, content, scheduled_at, delivered_at, notification_id, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, exId, content, scheduledAt, null, null, 'scheduled', now]
+  );
+
+  return {
+    content,
+    createdAt: now,
+    exId,
+    id,
+    scheduledAt,
+    status: 'scheduled',
+  };
+}
+
+export async function setProactiveNotificationId(proactiveMessageId: string, notificationId: string) {
+  if (Platform.OS === 'web') {
+    return setWebProactiveNotificationId(proactiveMessageId, notificationId);
+  }
+
+  const database = await getDatabase();
+  await database.runAsync(
+    'UPDATE proactive_messages SET notification_id = ? WHERE id = ?',
+    [notificationId, proactiveMessageId]
+  );
+}
+
+export async function getScheduledProactiveMessages(exId: string): Promise<ProactiveMessage[]> {
+  if (Platform.OS === 'web') {
+    return getWebScheduledProactiveMessages(exId);
+  }
+
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<ProactiveMessageRow>(
+    `
+      SELECT id, ex_id, content, scheduled_at, delivered_at, notification_id, status, created_at
+      FROM proactive_messages
+      WHERE ex_id = ? AND status = 'scheduled' AND scheduled_at > ?
+      ORDER BY scheduled_at ASC
+    `,
+    [exId, Date.now()]
+  );
+
+  return rows.map(mapProactiveMessageRow);
+}
+
+export async function deliverProactiveMessage(proactiveMessageId: string): Promise<string | null> {
+  if (Platform.OS === 'web') {
+    return deliverWebProactiveMessage(proactiveMessageId);
+  }
+
+  const database = await getDatabase();
+  const row = await database.getFirstAsync<ProactiveMessageRow>(
+    `
+      SELECT id, ex_id, content, scheduled_at, delivered_at, notification_id, status, created_at
+      FROM proactive_messages
+      WHERE id = ?
+    `,
+    proactiveMessageId
+  );
+
+  if (!row || row.status !== 'scheduled') {
+    return row?.ex_id ?? null;
+  }
+
+  const now = Date.now();
+  await database.withTransactionAsync(async () => {
+    await database.runAsync(
+      `INSERT INTO messages (id, ex_id, role, content, created_at, source)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [`msg-${now.toString(36)}`, row.ex_id, 'assistant', row.content, now, 'proactive']
+    );
+    await database.runAsync(
+      `UPDATE proactive_messages
+       SET status = 'delivered', delivered_at = ?
+       WHERE id = ?`,
+      [now, row.id]
+    );
+    await database.runAsync(
+      'UPDATE ex_profiles SET updated_at = ? WHERE id = ?',
+      [now, row.ex_id]
+    );
+  });
+
+  return row.ex_id;
+}
+
 function isVisibleChatMessage(
   row: MessageRow
 ): row is MessageRow & { role: 'assistant' | 'user' } {
@@ -409,6 +533,19 @@ function mapExProfileDetailRow(row: ExProfileRow): ExProfileDetail {
     sharedMemories: row.shared_memories,
     speechStyle: row.speech_style,
     triggers: row.triggers,
+  };
+}
+
+function mapProactiveMessageRow(row: ProactiveMessageRow): ProactiveMessage {
+  return {
+    content: row.content,
+    createdAt: row.created_at,
+    deliveredAt: row.delivered_at ?? undefined,
+    exId: row.ex_id,
+    id: row.id,
+    notificationId: row.notification_id ?? undefined,
+    scheduledAt: row.scheduled_at,
+    status: row.status,
   };
 }
 

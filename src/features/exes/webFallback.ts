@@ -1,4 +1,4 @@
-import { ChatMessage, ExProfileDetail, LearningSource } from './types';
+import { ChatMessage, ExProfileDetail, LearningSource, ProactiveMessage } from './types';
 
 const webExProfiles: ExProfileDetail[] = [
   {
@@ -65,6 +65,7 @@ const webMessages: Record<string, ChatMessage[]> = {
 };
 
 const webLearningSources: Record<string, LearningSource[]> = {};
+const webProactiveMessages: Record<string, ProactiveMessage[]> = {};
 
 export function getWebExProfiles() {
   return webExProfiles.map(({ persona, sharedMemories, speechStyle, triggers, ...profile }) => profile);
@@ -104,6 +105,7 @@ export function createWebExProfile(input: {
   webExProfiles.unshift(profile);
   webMessages[id] = [];
   webLearningSources[id] = [];
+  webProactiveMessages[id] = [];
 
   return profile;
 }
@@ -208,4 +210,55 @@ export function addWebAssistantMessage(
   }
 
   return message;
+}
+
+export function createWebProactiveMessage(
+  exId: string,
+  content: string,
+  scheduledAt: number
+): ProactiveMessage {
+  const proactiveMessage: ProactiveMessage = {
+    content,
+    createdAt: Date.now(),
+    exId,
+    id: `web-proactive-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    scheduledAt,
+    status: 'scheduled',
+  };
+
+  webProactiveMessages[exId] = [proactiveMessage, ...(webProactiveMessages[exId] ?? [])];
+  return proactiveMessage;
+}
+
+export function setWebProactiveNotificationId(proactiveMessageId: string, notificationId: string) {
+  const proactiveMessage = Object.values(webProactiveMessages)
+    .flat()
+    .find((message) => message.id === proactiveMessageId);
+
+  if (proactiveMessage) {
+    proactiveMessage.notificationId = notificationId;
+  }
+}
+
+export function getWebScheduledProactiveMessages(exId: string) {
+  const now = Date.now();
+  return (webProactiveMessages[exId] ?? [])
+    .filter((message) => message.status === 'scheduled' && message.scheduledAt > now)
+    .sort((a, b) => a.scheduledAt - b.scheduledAt);
+}
+
+export function deliverWebProactiveMessage(proactiveMessageId: string) {
+  const proactiveMessage = Object.values(webProactiveMessages)
+    .flat()
+    .find((message) => message.id === proactiveMessageId);
+
+  if (!proactiveMessage || proactiveMessage.status !== 'scheduled') {
+    return proactiveMessage?.exId ?? null;
+  }
+
+  proactiveMessage.status = 'delivered';
+  proactiveMessage.deliveredAt = Date.now();
+  addWebAssistantMessage(proactiveMessage.exId, proactiveMessage.content);
+
+  return proactiveMessage.exId;
 }

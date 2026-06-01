@@ -4,7 +4,7 @@ import { getDatabase } from '@/lib/database/client';
 import { formatListTime, formatMessageTime } from '@/lib/time/format';
 
 import { ChatMessage, ExProfile, ExProfileDetail } from './types';
-import { getWebExProfile, getWebExProfiles, getWebMessages } from './webFallback';
+import { createWebExProfile, getWebExProfile, getWebExProfiles, getWebMessages } from './webFallback';
 
 type ExProfileRow = {
   id: string;
@@ -28,6 +28,14 @@ type MessageRow = {
   created_at: number;
   delay_note: string | null;
   sticker: string | null;
+};
+
+type CreateExProfileInput = {
+  avatar: string;
+  description: string;
+  mood: string;
+  name: string;
+  temperature: number;
 };
 
 export async function getExProfiles(): Promise<ExProfile[]> {
@@ -117,6 +125,44 @@ export async function getMessages(exId: string): Promise<ChatMessage[]> {
     }));
 }
 
+export async function createExProfile(input: CreateExProfileInput): Promise<ExProfileDetail> {
+  if (Platform.OS === 'web') {
+    return createWebExProfile(input);
+  }
+
+  const database = await getDatabase();
+  const now = Date.now();
+  const id = `ex-${now.toString(36)}`;
+  const temperature = clampTemperature(input.temperature);
+
+  await database.runAsync(
+    `INSERT INTO ex_profiles
+      (id, name, avatar, description, mood, temperature, persona, shared_memories, speech_style, triggers, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      input.name,
+      input.avatar,
+      input.description,
+      input.mood,
+      temperature,
+      '还没有学习资料。先根据用户描述保持克制，不要过度编造。',
+      '还没有共同记忆摘要。',
+      '等待学习资料后生成说话习惯。',
+      '等待学习资料后生成雷点和边界。',
+      now,
+      now
+    ]
+  );
+
+  const profile = await getExProfile(id);
+  if (!profile) {
+    throw new Error('创建成功但读取角色失败');
+  }
+
+  return profile;
+}
+
 function isVisibleChatMessage(
   row: MessageRow
 ): row is MessageRow & { role: 'assistant' | 'user' } {
@@ -144,4 +190,12 @@ function mapExProfileDetailRow(row: ExProfileRow): ExProfileDetail {
     speechStyle: row.speech_style,
     triggers: row.triggers,
   };
+}
+
+function clampTemperature(value: number) {
+  if (Number.isNaN(value)) {
+    return 50;
+  }
+
+  return Math.max(0, Math.min(100, value));
 }

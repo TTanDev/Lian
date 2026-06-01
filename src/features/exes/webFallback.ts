@@ -75,3 +75,32 @@ export function getWebExProfile(id: string) {
 export function getWebMessages(exId: string) {
   return webMessages[exId] ?? [];
 }
+
+export function createWebExProfile(input: {
+  avatar: string;
+  description: string;
+  mood: string;
+  name: string;
+  temperature: number;
+}) {
+  const id = `web-${Date.now().toString(36)}`;
+  const profile: ExProfileDetail = {
+    id,
+    avatar: input.avatar,
+    description: input.description,
+    lastMessage: '还没有消息',
+    lastMessageAt: '',
+    mood: input.mood,
+    name: input.name,
+    persona: '还没有学习资料。先根据用户描述保持克制，不要过度编造。',
+    sharedMemories: '还没有共同记忆摘要。',
+    speechStyle: '等待学习资料后生成说话习惯。',
+    temperature: Math.max(0, Math.min(100, input.temperature)),
+    triggers: '等待学习资料后生成雷点和边界。',
+  };
+
+  webExProfiles.unshift(profile);
+  webMessages[id] = [];
+
+  return profile;
+}

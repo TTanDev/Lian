@@ -23,9 +23,11 @@ export default function ExListScreen() {
               <Settings color={palette.text} size={21} />
             </Pressable>
           </Link>
-          <Pressable style={styles.primaryButton}>
-            <Plus color={palette.text} size={22} />
-          </Pressable>
+          <Link href="/ex/new" asChild>
+            <Pressable style={styles.primaryButton}>
+              <Plus color={palette.text} size={22} />
+            </Pressable>
+          </Link>
         </View>
       </View>
 

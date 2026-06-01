@@ -136,6 +136,26 @@ export function getWebLearningSources(exId: string) {
   return webLearningSources[exId] ?? [];
 }
 
+export function updateWebSkillProfile(
+  exId: string,
+  draft: {
+    persona: string;
+    sharedMemories: string;
+    speechStyle: string;
+    triggers: string;
+  }
+) {
+  const profile = webExProfiles.find((item) => item.id === exId);
+  if (!profile) {
+    return;
+  }
+
+  profile.persona = draft.persona;
+  profile.sharedMemories = draft.sharedMemories;
+  profile.speechStyle = draft.speechStyle;
+  profile.triggers = draft.triggers;
+}
+
 export function addWebUserMessage(exId: string, content: string): ChatMessage {
   const now = new Date();
   const message: ChatMessage = {

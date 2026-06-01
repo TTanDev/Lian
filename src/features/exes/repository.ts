@@ -13,6 +13,7 @@ import {
   getWebExProfiles,
   getWebLearningSources,
   getWebMessages,
+  updateWebSkillProfile,
 } from './webFallback';
 
 type ExProfileRow = {
@@ -354,6 +355,32 @@ export async function getLearningSources(exId: string): Promise<LearningSource[]
     title: row.title,
     type: row.type,
   }));
+}
+
+export async function updateSkillProfile(
+  exId: string,
+  draft: {
+    persona: string;
+    sharedMemories: string;
+    speechStyle: string;
+    triggers: string;
+  }
+) {
+  if (Platform.OS === 'web') {
+    return updateWebSkillProfile(exId, draft);
+  }
+
+  const database = await getDatabase();
+  const now = Date.now();
+
+  await database.runAsync(
+    `
+      UPDATE ex_profiles
+      SET persona = ?, shared_memories = ?, speech_style = ?, triggers = ?, updated_at = ?
+      WHERE id = ?
+    `,
+    [draft.persona, draft.sharedMemories, draft.speechStyle, draft.triggers, now, exId]
+  );
 }
 
 function isVisibleChatMessage(

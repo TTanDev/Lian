@@ -6,9 +6,19 @@ import { useEffect, useState } from 'react';
 import { GlassCard } from '@/components/GlassCard';
 import { Screen } from '@/components/Screen';
 import { useExProfile } from '@/features/exes/hooks';
-import { addLearningSource, getLearningSources } from '@/features/exes/repository';
+import {
+  addLearningSource,
+  getLearningSources,
+  updateSkillProfile,
+} from '@/features/exes/repository';
 import { LearningSource, LearningSourceType } from '@/features/exes/types';
 import { pickDocumentSource, pickImageSource } from '@/features/learning/importers';
+import {
+  buildSkillProfilePrompt,
+  parseSkillProfileDraft,
+} from '@/features/learning/skillProfile';
+import { generateStructuredText } from '@/lib/openai/client';
+import { getApiSettings } from '@/lib/settings/apiSettings';
 import { palette } from '@/theme/palette';
 
 const sourceTypes = [
@@ -23,6 +33,7 @@ export default function LearningScreen() {
   const { data: ex, error, loading } = useExProfile(id);
   const [sources, setSources] = useState<LearningSource[]>([]);
   const [actionStatus, setActionStatus] = useState('资料会先保存在本机，之后再分批学习。');
+  const [learning, setLearning] = useState(false);
 
   useEffect(() => {
     if (!id) {
@@ -89,6 +100,27 @@ export default function LearningScreen() {
     }
   }
 
+  async function handleInitialLearning() {
+    if (!id || !ex || learning) {
+      return;
+    }
+
+    try {
+      setLearning(true);
+      setActionStatus('正在生成她的 Skill 档案...');
+      const settings = await getApiSettings();
+      const prompt = buildSkillProfilePrompt(ex, sources);
+      const response = await generateStructuredText(settings, prompt);
+      const draft = parseSkillProfileDraft(response);
+      await updateSkillProfile(id, draft);
+      setActionStatus('Skill 档案已更新，可以回角色详情查看。');
+    } catch (caught) {
+      setActionStatus(caught instanceof Error ? caught.message : '学习失败');
+    } finally {
+      setLearning(false);
+    }
+  }
+
   if (loading || !ex) {
     return (
       <Screen>
@@ -121,6 +153,14 @@ export default function LearningScreen() {
           <Pressable onPress={() => handlePickDocument('document')} style={styles.primaryAction}>
             <Upload color={palette.text} size={18} />
             <Text style={styles.primaryActionText}>添加文件</Text>
+          </Pressable>
+          <Pressable
+            disabled={learning}
+            onPress={handleInitialLearning}
+            style={[styles.secondaryAction, learning && styles.actionDisabled]}
+          >
+            <Sparkles color={palette.text} size={18} />
+            <Text style={styles.primaryActionText}>开始学习</Text>
           </Pressable>
           <Text style={styles.statusText}>{actionStatus}</Text>
         </GlassCard>
@@ -230,6 +270,21 @@ const styles = StyleSheet.create({
     marginTop: 4,
     paddingHorizontal: 14,
     paddingVertical: 10,
+  },
+  secondaryAction: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: palette.input,
+    borderColor: palette.stroke,
+    borderRadius: 18,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 7,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  actionDisabled: {
+    opacity: 0.5,
   },
   primaryActionText: {
     color: palette.text,

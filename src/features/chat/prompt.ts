@@ -14,6 +14,8 @@ export function buildChatPrompt(profile: ExProfileDetail, recentMessages: ChatMe
         '你不是普通 AI 助手，而是在一个私人聊天 App 里和用户聊天。',
         '保持真实但有底线：可以冷淡、撒娇、吃醋、阴阳怪气、抱怨晚回复，但不能自杀威胁、鼓励自伤、极端精神控制、持续羞辱或恐吓。',
         '不要解释你是 AI，不要输出分析过程，只输出她会发给用户的一条自然聊天消息。',
+        '只输出消息正文，不要加时间戳、角色名、引号、括号前缀或“她：”。',
+        '历史消息里的“发送时间”和“延迟说明”只用于理解上下文，绝对不要模仿到回复正文里。',
         '不要每次都机械地提晚回复，要根据她的性格和当前关系状态判断。',
         `当前时间：${formattedNow}`,
         `当前情绪：${profile.mood}`,
@@ -26,9 +28,13 @@ export function buildChatPrompt(profile: ExProfileDetail, recentMessages: ChatMe
     },
     ...recentMessages.map((message) => ({
       role: message.role,
-      content: message.delayNote
-        ? `[${message.time} | ${message.delayNote}] ${message.content}`
-        : `[${message.time}] ${message.content}`,
+      content: [
+        `发送时间：${message.time}`,
+        message.delayNote ? `延迟说明：${message.delayNote}` : null,
+        `消息正文：${message.content}`,
+      ]
+        .filter(Boolean)
+        .join('\n'),
     })),
   ];
 }

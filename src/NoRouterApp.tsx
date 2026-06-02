@@ -182,7 +182,7 @@ function ChatScreen({
       ]);
       const prompt = buildChatPrompt(profile, recentMessages);
       const reply = await generateChatReply(settings, prompt);
-      await addAssistantMessage(id, reply || '我不知道该怎么回你。');
+      await addAssistantMessage(id, cleanupChatReply(reply) || '我不知道该怎么回你。');
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '发送失败');
@@ -492,6 +492,16 @@ function RoundButton({
       <Text style={styles.roundButtonText}>{label}</Text>
     </PressableScale>
   );
+}
+
+function cleanupChatReply(reply: string) {
+  return reply
+    .trim()
+    .replace(/^["“”]+|["“”]+$/g, '')
+    .replace(/^(?:她|助手|assistant|AI)\s*[:：]\s*/i, '')
+    .replace(/^(?:\[\s*)?(?:今天|昨天|前天)?\s*\d{1,2}[:：]\d{2}(?:\s*\])?\s*[，,。:：、-]?\s*/u, '')
+    .replace(/^\[\s*(?:\d{1,2}[:：]\d{2}\s*)+\]\s*/u, '')
+    .trim();
 }
 
 function PressableScale({

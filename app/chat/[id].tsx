@@ -13,10 +13,6 @@ import {
   getRecentMessagesForPrompt,
 } from '@/features/exes/repository';
 import { buildChatPrompt } from '@/features/chat/prompt';
-import {
-  letHerSaySomethingNow,
-  scheduleUpcomingProactiveMessages,
-} from '@/features/proactive/queue';
 import { generateChatReply } from '@/lib/openai/client';
 import { getApiSettings } from '@/lib/settings/apiSettings';
 import { palette } from '@/theme/palette';
@@ -76,7 +72,8 @@ export default function ChatScreen() {
 
     try {
       setProactiveStatus('她正在想要不要主动说点什么...');
-      await letHerSaySomethingNow(ex);
+      const proactiveQueue = await import('@/features/proactive/queue');
+      await proactiveQueue.letHerSaySomethingNow(ex);
       reloadMessages();
       setProactiveStatus('她主动发了一句。');
     } catch (caught) {
@@ -91,7 +88,8 @@ export default function ChatScreen() {
 
     try {
       setProactiveStatus('正在安排未来主动消息...');
-      const count = await scheduleUpcomingProactiveMessages(ex);
+      const proactiveQueue = await import('@/features/proactive/queue');
+      const count = await proactiveQueue.scheduleUpcomingProactiveMessages(ex);
       setProactiveStatus(`已安排 ${count} 条未来主动消息。`);
     } catch (caught) {
       setProactiveStatus(caught instanceof Error ? caught.message : '安排主动消息失败');

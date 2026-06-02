@@ -1,4 +1,3 @@
-import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 import { getDatabase } from '@/lib/database/client';
@@ -29,6 +28,7 @@ export async function getApiSettings(): Promise<ApiSettings> {
   }
 
   const database = await getDatabase();
+  const SecureStore = await import('expo-secure-store');
   const rows = await database.getAllAsync<{ key: string; value: string }>(
     "SELECT key, value FROM app_settings WHERE key IN ('api.baseUrl', 'api.model')"
   );
@@ -57,6 +57,7 @@ export async function saveApiSettings(settings: ApiSettings) {
   }
 
   const database = await getDatabase();
+  const SecureStore = await import('expo-secure-store');
   const now = Date.now();
 
   await database.withTransactionAsync(async () => {

@@ -9,7 +9,6 @@ import { ExProfileDetail } from '@/features/exes/types';
 import { generateChatReply } from '@/lib/openai/client';
 import { getApiSettings } from '@/lib/settings/apiSettings';
 
-import { ensureNotificationPermissions, scheduleProactiveNotification } from './notifications';
 import { buildProactivePrompt } from './prompt';
 
 export async function letHerSaySomethingNow(profile: ExProfileDetail) {
@@ -21,7 +20,8 @@ export async function letHerSaySomethingNow(profile: ExProfileDetail) {
 }
 
 export async function scheduleUpcomingProactiveMessages(profile: ExProfileDetail) {
-  const allowed = await ensureNotificationPermissions();
+  const notifications = await import('./notifications');
+  const allowed = await notifications.ensureNotificationPermissions();
   if (!allowed) {
     throw new Error('需要允许本地通知，才能安排她主动发消息。');
   }
@@ -36,7 +36,7 @@ export async function scheduleUpcomingProactiveMessages(profile: ExProfileDetail
   for (const scheduledAt of dates) {
     const content = await buildScheduledProactiveContent(profile, scheduledAt);
     const message = await createProactiveMessage(profile.id, content, scheduledAt);
-    const notificationId = await scheduleProactiveNotification(message, profile.name);
+    const notificationId = await notifications.scheduleProactiveNotification(message, profile.name);
     await setProactiveNotificationId(message.id, notificationId);
   }
 

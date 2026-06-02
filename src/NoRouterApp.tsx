@@ -192,6 +192,7 @@ function ChatScreen({
   const [searchVisible, setSearchVisible] = useState(Boolean(screen.search));
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView | null>(null);
 
@@ -255,6 +256,30 @@ function ChatScreen({
 
     return () => subscription.remove();
   }, [id]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSubscription = Keyboard.addListener(showEvent, () => {
+      setKeyboardVisible(true);
+      setTimeout(() => scrollToBottom(true), 80);
+      setTimeout(() => scrollToBottom(true), 260);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (toolPanel) {
+      setTimeout(() => scrollToBottom(true), 80);
+    }
+  }, [toolPanel]);
 
   async function send() {
     const content = draft.trim();
@@ -345,7 +370,10 @@ function ChatScreen({
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <ScrollView
-          contentContainerStyle={styles.messages}
+          contentContainerStyle={[
+            styles.messages,
+            (keyboardVisible || toolPanel) && styles.messagesWithBottomControls,
+          ]}
           keyboardShouldPersistTaps="handled"
           onContentSizeChange={() => {
             if (!searchQuery.trim()) {
@@ -373,6 +401,7 @@ function ChatScreen({
           </PressableScale>
           <TextInput
             onChangeText={setDraft}
+            onFocus={() => setTimeout(() => scrollToBottom(true), 120)}
             placeholder="说点什么..."
             placeholderTextColor={colors.muted}
             style={styles.input}
@@ -402,21 +431,21 @@ function ChatScreen({
           </View>
         ) : null}
         {toolPanel === 'emoji' ? (
-          <View style={styles.toolPanel}>
+          <SlidingToolPanel>
             {['🙂', '😒', '🥺', '😂', '😉', '😤', '😭', '🫠', '❤️', '👌'].map((emoji) => (
               <PressableScale key={emoji} onPress={() => appendEmoji(emoji)} style={styles.emojiButton}>
                 <Text style={styles.emojiText}>{emoji}</Text>
               </PressableScale>
             ))}
-          </View>
+          </SlidingToolPanel>
         ) : null}
         {toolPanel === 'plus' ? (
-          <View style={styles.toolPanel}>
+          <SlidingToolPanel>
             <ToolTile label="照片" icon="▧" onPress={pickChatImages} />
             <ToolTile label="拍摄" icon="○" onPress={pickChatImages} />
             <ToolTile label="表情" icon="☺" onPress={() => setToolPanel('emoji')} />
             <ToolTile label="资料" icon="※" onPress={() => navigate({ name: 'learning', id })} />
-          </View>
+          </SlidingToolPanel>
         ) : null}
       </ScreenFrame>
     </KeyboardAvoidingView>
@@ -687,7 +716,7 @@ function LearningScreen({
   }
 
   return (
-    <ScreenFrame onSwipeBack={() => navigate({ name: 'chat', id })}>
+    <ScreenFrame flushBottom onSwipeBack={() => navigate({ name: 'chat', id })}>
       <View style={styles.chatHeader}>
         <RoundButton label="‹" onPress={() => navigate({ name: 'chat', id })} />
         <View style={styles.chatTitleBox}>
@@ -697,7 +726,11 @@ function LearningScreen({
       </View>
 
       {loading ? <LoadingLine text="正在读取资料库..." /> : null}
-      <ScrollView contentContainerStyle={styles.learningContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.learningContent}
+        showsVerticalScrollIndicator={false}
+        style={styles.fillScroll}
+      >
         <View style={styles.panel}>
           <Text style={styles.panelTitle}>导入资料</Text>
           <Text style={styles.panelBody}>
@@ -966,10 +999,12 @@ function NewProfileScreen({ navigate }: { navigate: (screen: ScreenState) => voi
 function ScreenFrame({
   children,
   compact,
+  flushBottom,
   onSwipeBack,
 }: {
   children: React.ReactNode;
   compact?: boolean;
+  flushBottom?: boolean;
   onSwipeBack?: () => void;
 }) {
   const { styles } = useAppTheme();
@@ -1013,6 +1048,7 @@ function ScreenFrame({
       style={[
         styles.screen,
         compact && styles.screenCompact,
+        flushBottom && styles.screenFlushBottom,
         {
           opacity,
           transform: [{ translateY }],
@@ -1197,8 +1233,45 @@ function ToolTile({ icon, label, onPress }: { icon: string; label: string; onPre
   return (
     <PressableScale onPress={onPress} style={styles.toolTile}>
       <Text style={styles.toolIcon}>{icon}</Text>
-      <Text style={styles.toolLabel}>{label}</Text>
+      <Text numberOfLines={1} style={styles.toolLabel}>{label}</Text>
     </PressableScale>
+  );
+}
+
+function SlidingToolPanel({ children }: { children: React.ReactNode }) {
+  const { styles } = useAppTheme();
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(18)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, {
+        duration: 180,
+        easing: Easing.out(Easing.cubic),
+        toValue: 1,
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        toValue: 0,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [opacity, translateY]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.toolPanel,
+        {
+          opacity,
+          transform: [{ translateY }],
+        },
+      ]}
+    >
+      {children}
+    </Animated.View>
   );
 }
 
@@ -1343,7 +1416,13 @@ const createStyles = (palette: AppPalette) => StyleSheet.create({
     padding: 22,
   },
   screenCompact: {
-    paddingBottom: 10,
+    paddingBottom: 0,
+  },
+  screenFlushBottom: {
+    paddingBottom: 0,
+  },
+  fillScroll: {
+    flex: 1,
   },
   chatBackgroundImage: {
     bottom: 0,
@@ -1494,7 +1573,10 @@ const createStyles = (palette: AppPalette) => StyleSheet.create({
     flexGrow: 1,
     gap: 12,
     justifyContent: 'flex-end',
-    paddingBottom: 16,
+    paddingBottom: 18,
+  },
+  messagesWithBottomControls: {
+    paddingBottom: 34,
   },
   emptySearchText: {
     alignSelf: 'center',
@@ -1592,11 +1674,13 @@ const createStyles = (palette: AppPalette) => StyleSheet.create({
     borderTopWidth: 1,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    justifyContent: 'space-between',
     marginHorizontal: -22,
+    marginBottom: -36,
     marginTop: 10,
     paddingHorizontal: 22,
-    paddingVertical: 18,
+    paddingBottom: 40,
+    paddingTop: 18,
   },
   emojiButton: {
     alignItems: 'center',
@@ -1612,7 +1696,7 @@ const createStyles = (palette: AppPalette) => StyleSheet.create({
   toolTile: {
     alignItems: 'center',
     gap: 8,
-    width: '22%',
+    width: 64,
   },
   toolIcon: {
     backgroundColor: palette.input,
@@ -1629,6 +1713,8 @@ const createStyles = (palette: AppPalette) => StyleSheet.create({
     color: palette.subtle,
     fontSize: 12,
     fontWeight: '700',
+    textAlign: 'center',
+    width: 64,
   },
   sendButton: {
     alignItems: 'center',
@@ -1680,7 +1766,7 @@ const createStyles = (palette: AppPalette) => StyleSheet.create({
   },
   learningContent: {
     gap: 14,
-    paddingBottom: 28,
+    paddingBottom: 96,
   },
   panel: {
     backgroundColor: palette.glassStrong,

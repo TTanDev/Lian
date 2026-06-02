@@ -50,3 +50,28 @@ export async function pickImageSources(defaultType: LearningSourceType = 'image'
     type: defaultType,
   }));
 }
+
+export async function pickCameraSource(defaultType: LearningSourceType = 'image') {
+  const ImagePicker = await import('expo-image-picker');
+  const permission = await ImagePicker.requestCameraPermissionsAsync();
+  if (!permission.granted) {
+    throw new Error('需要相机权限才能拍摄照片');
+  }
+
+  const result = await ImagePicker.launchCameraAsync({
+    allowsEditing: false,
+    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    quality: 0.92,
+  });
+
+  if (result.canceled) {
+    return null;
+  }
+
+  const asset = result.assets[0];
+  return {
+    localUri: asset.uri,
+    title: asset.fileName || `拍摄照片 ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`,
+    type: defaultType,
+  };
+}

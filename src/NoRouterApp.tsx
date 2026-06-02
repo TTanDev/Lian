@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import {
   ActivityIndicator,
   Animated,
+  Appearance,
   AppState,
   Easing,
   Image,
@@ -37,7 +38,7 @@ import {
   updateSkillProfile,
 } from '@/features/exes/repository';
 import { ChatMessage, ExProfile, ExProfileDetail, LearningSource, LearningSourceType } from '@/features/exes/types';
-import { pickDocumentSource, pickImageSource, pickImageSources } from '@/features/learning/importers';
+import { pickCameraSource, pickDocumentSource, pickImageSource, pickImageSources } from '@/features/learning/importers';
 import { buildSkillProfilePrompt, parseSkillProfileDraft } from '@/features/learning/skillProfile';
 import { generateChatReply, generateStructuredText, testOpenAIConnection } from '@/lib/openai/client';
 import { getThemeMode, saveThemeMode, ThemeMode } from '@/lib/settings/appearanceSettings';
@@ -48,7 +49,7 @@ type ScreenState =
   | { name: 'home' }
   | { name: 'chat'; id: string; search?: boolean }
   | { name: 'chatMenu'; id: string }
-  | { name: 'learning'; id: string }
+  | { name: 'learning'; id: string; from?: 'chat' | 'chatMenu' }
   | { name: 'settings' }
   | { name: 'new' };
 
@@ -69,7 +70,8 @@ const emptySettings: ApiSettings = {
 
 export default function NoRouterApp() {
   const [screen, setScreen] = useState<ScreenState>({ name: 'home' });
-  const systemScheme = useColorScheme();
+  const detectedScheme = useColorScheme();
+  const [systemScheme, setSystemScheme] = useState(detectedScheme);
   const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
   const isLight = themeMode === 'light' || (themeMode === 'auto' && systemScheme === 'light');
   const colors = isLight ? lightPalette : darkPalette;
@@ -79,6 +81,18 @@ export default function NoRouterApp() {
     getThemeMode().then(setThemeMode).catch(() => setThemeMode('dark'));
   }, []);
 
+  useEffect(() => {
+    setSystemScheme(detectedScheme);
+  }, [detectedScheme]);
+
+  useEffect(() => {
+    const subscription = Appearance.addChangeListener(({ colorScheme }) => {
+      setSystemScheme(colorScheme);
+    });
+
+    return () => subscription.remove();
+  }, []);
+
   async function changeThemeMode(mode: ThemeMode) {
     setThemeMode(mode);
     await saveThemeMode(mode);
@@ -86,15 +100,17 @@ export default function NoRouterApp() {
 
   return (
     <ThemeContext.Provider value={{ colors, mode: themeMode, setMode: changeThemeMode, styles }}>
-      <SafeAreaView style={styles.safeArea}>
-        <StatusBar style={isLight ? 'dark' : 'light'} />
-        {screen.name === 'home' ? <HomeScreen navigate={setScreen} /> : null}
-        {screen.name === 'chat' ? <ChatScreen screen={screen} navigate={setScreen} /> : null}
-        {screen.name === 'chatMenu' ? <ChatMenuScreen id={screen.id} navigate={setScreen} /> : null}
-        {screen.name === 'learning' ? <LearningScreen id={screen.id} navigate={setScreen} /> : null}
-        {screen.name === 'settings' ? <SettingsScreen navigate={setScreen} /> : null}
-        {screen.name === 'new' ? <NewProfileScreen navigate={setScreen} /> : null}
-      </SafeAreaView>
+      <View style={styles.appRoot}>
+        <SafeAreaView style={styles.safeArea}>
+          <StatusBar style={isLight ? 'dark' : 'light'} />
+          {screen.name === 'home' ? <HomeScreen navigate={setScreen} /> : null}
+          {screen.name === 'chat' ? <ChatScreen screen={screen} navigate={setScreen} /> : null}
+          {screen.name === 'chatMenu' ? <ChatMenuScreen id={screen.id} navigate={setScreen} /> : null}
+          {screen.name === 'learning' ? <LearningScreen screen={screen} navigate={setScreen} /> : null}
+          {screen.name === 'settings' ? <SettingsScreen navigate={setScreen} /> : null}
+          {screen.name === 'new' ? <NewProfileScreen navigate={setScreen} /> : null}
+        </SafeAreaView>
+      </View>
     </ThemeContext.Provider>
   );
 }
@@ -211,6 +227,13 @@ function ChatScreen({
     requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated }));
   }
 
+  function scrollToBottomAfterLayout(animated = true) {
+    scrollToBottom(animated);
+    setTimeout(() => scrollToBottom(animated), 80);
+    setTimeout(() => scrollToBottom(animated), 220);
+    setTimeout(() => scrollToBottom(animated), 420);
+  }
+
   async function load(options?: { showSpinner?: boolean }) {
     try {
       if (options?.showSpinner !== false) {
@@ -262,8 +285,7 @@ function ChatScreen({
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
     const showSubscription = Keyboard.addListener(showEvent, () => {
       setKeyboardVisible(true);
-      setTimeout(() => scrollToBottom(true), 80);
-      setTimeout(() => scrollToBottom(true), 260);
+      scrollToBottomAfterLayout(true);
     });
     const hideSubscription = Keyboard.addListener(hideEvent, () => {
       setKeyboardVisible(false);
@@ -277,7 +299,7 @@ function ChatScreen({
 
   useEffect(() => {
     if (toolPanel) {
-      setTimeout(() => scrollToBottom(true), 80);
+      scrollToBottomAfterLayout(true);
     }
   }, [toolPanel]);
 
@@ -333,6 +355,19 @@ function ChatScreen({
     }
   }
 
+  async function takeChatPhoto() {
+    try {
+      Keyboard.dismiss();
+      const picked = await pickCameraSource('image');
+      if (picked) {
+        setSelectedImages((current) => [...current, picked.localUri].slice(0, 9));
+        setToolPanel(null);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '拍摄失败');
+    }
+  }
+
   function appendEmoji(emoji: string) {
     setDraft((current) => `${current}${emoji}`);
   }
@@ -372,7 +407,8 @@ function ChatScreen({
         <ScrollView
           contentContainerStyle={[
             styles.messages,
-            (keyboardVisible || toolPanel) && styles.messagesWithBottomControls,
+            keyboardVisible && styles.messagesWithKeyboard,
+            toolPanel && styles.messagesWithToolPanel,
           ]}
           keyboardShouldPersistTaps="handled"
           onContentSizeChange={() => {
@@ -401,7 +437,7 @@ function ChatScreen({
           </PressableScale>
           <TextInput
             onChangeText={setDraft}
-            onFocus={() => setTimeout(() => scrollToBottom(true), 120)}
+            onFocus={() => scrollToBottomAfterLayout(true)}
             placeholder="说点什么..."
             placeholderTextColor={colors.muted}
             style={styles.input}
@@ -442,9 +478,9 @@ function ChatScreen({
         {toolPanel === 'plus' ? (
           <SlidingToolPanel>
             <ToolTile label="照片" icon="▧" onPress={pickChatImages} />
-            <ToolTile label="拍摄" icon="○" onPress={pickChatImages} />
+            <ToolTile label="拍摄" icon="○" onPress={takeChatPhoto} />
             <ToolTile label="表情" icon="☺" onPress={() => setToolPanel('emoji')} />
-            <ToolTile label="资料" icon="※" onPress={() => navigate({ name: 'learning', id })} />
+            <ToolTile label="资料" icon="※" onPress={() => navigate({ name: 'learning', id, from: 'chat' })} />
           </SlidingToolPanel>
         ) : null}
       </ScreenFrame>
@@ -539,7 +575,7 @@ function ChatMenuScreen({
 
       <View style={styles.menuPageList}>
         <MenuRow title="搜索聊天记录" detail="进入聊天页后显示搜索框" onPress={() => navigate({ name: 'chat', id, search: true })} />
-        <MenuRow title="学习资料" detail="导入资料、查看和细调 Skill 档案" onPress={() => navigate({ name: 'learning', id })} />
+        <MenuRow title="学习资料" detail="导入资料、查看和细调 Skill 档案" onPress={() => navigate({ name: 'learning', id, from: 'chatMenu' })} />
         <MenuRow title="更换头像" detail="不选头像时继续显示首字" onPress={pickAvatar} />
         <MenuRow title="自定义聊天背景" detail={profile?.chatBackgroundUri ? '已设置，可继续更换' : '从相册选择一张背景图'} onPress={pickBackground} />
         {profile?.chatBackgroundUri ? <MenuRow title="恢复默认背景" detail="移除当前聊天背景" onPress={removeBackground} /> : null}
@@ -565,13 +601,15 @@ function ChatMenuScreen({
 }
 
 function LearningScreen({
-  id,
+  screen,
   navigate,
 }: {
-  id: string;
+  screen: Extract<ScreenState, { name: 'learning' }>;
   navigate: (screen: ScreenState) => void;
 }) {
   const { colors, styles } = useAppTheme();
+  const { id } = screen;
+  const backTarget: ScreenState = screen.from === 'chatMenu' ? { name: 'chatMenu', id } : { name: 'chat', id };
   const [profile, setProfile] = useState<ExProfileDetail | null>(null);
   const [sources, setSources] = useState<LearningSource[]>([]);
   const [manualText, setManualText] = useState('');
@@ -716,9 +754,9 @@ function LearningScreen({
   }
 
   return (
-    <ScreenFrame flushBottom onSwipeBack={() => navigate({ name: 'chat', id })}>
+    <ScreenFrame flushBottom onSwipeBack={() => navigate(backTarget)}>
       <View style={styles.chatHeader}>
-        <RoundButton label="‹" onPress={() => navigate({ name: 'chat', id })} />
+        <RoundButton label="‹" onPress={() => navigate(backTarget)} />
         <View style={styles.chatTitleBox}>
           <Text style={styles.titleSmall}>学习资料</Text>
           <Text style={styles.metaText}>{profile?.name ?? '她'} 的 Skill 档案</Text>
@@ -898,13 +936,13 @@ function SettingsScreen({ navigate }: { navigate: (screen: ScreenState) => void 
             ['light', '浅色'],
             ['auto', '自动'],
           ] as const).map(([value, label]) => (
-            <PressableScale
+            <Pressable
               key={value}
               onPress={() => setMode(value)}
               style={[styles.segmentButton, mode === value && styles.segmentButtonActive]}
             >
               <Text style={[styles.segmentText, mode === value && styles.segmentTextActive]}>{label}</Text>
-            </PressableScale>
+            </Pressable>
           ))}
         </View>
       </View>
@@ -1232,7 +1270,9 @@ function ToolTile({ icon, label, onPress }: { icon: string; label: string; onPre
 
   return (
     <PressableScale onPress={onPress} style={styles.toolTile}>
-      <Text style={styles.toolIcon}>{icon}</Text>
+      <View style={styles.toolIconBox}>
+        <Text style={styles.toolIcon}>{icon}</Text>
+      </View>
       <Text numberOfLines={1} style={styles.toolLabel}>{label}</Text>
     </PressableScale>
   );
@@ -1407,6 +1447,10 @@ const createStyles = (palette: AppPalette) => StyleSheet.create({
     backgroundColor: palette.background,
     flex: 1,
   },
+  appRoot: {
+    backgroundColor: palette.background,
+    flex: 1,
+  },
   flex: {
     flex: 1,
   },
@@ -1575,8 +1619,11 @@ const createStyles = (palette: AppPalette) => StyleSheet.create({
     justifyContent: 'flex-end',
     paddingBottom: 18,
   },
-  messagesWithBottomControls: {
-    paddingBottom: 34,
+  messagesWithKeyboard: {
+    paddingBottom: 112,
+  },
+  messagesWithToolPanel: {
+    paddingBottom: 42,
   },
   emptySearchText: {
     alignSelf: 'center',
@@ -1676,11 +1723,11 @@ const createStyles = (palette: AppPalette) => StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'space-between',
     marginHorizontal: -22,
-    marginBottom: -36,
+    marginBottom: -44,
     marginTop: 10,
     paddingHorizontal: 22,
-    paddingBottom: 40,
-    paddingTop: 18,
+    paddingBottom: 52,
+    paddingTop: 20,
   },
   emojiButton: {
     alignItems: 'center',
@@ -1695,26 +1742,30 @@ const createStyles = (palette: AppPalette) => StyleSheet.create({
   },
   toolTile: {
     alignItems: 'center',
-    gap: 8,
-    width: 64,
+    gap: 10,
+    justifyContent: 'flex-start',
+    minHeight: 92,
+    width: 72,
   },
-  toolIcon: {
+  toolIconBox: {
+    alignItems: 'center',
     backgroundColor: palette.input,
     borderRadius: 16,
+    height: 58,
+    justifyContent: 'center',
+    width: 58,
+  },
+  toolIcon: {
     color: palette.text,
     fontSize: 24,
-    height: 58,
-    lineHeight: 58,
-    overflow: 'hidden',
     textAlign: 'center',
-    width: 58,
   },
   toolLabel: {
     color: palette.subtle,
     fontSize: 12,
     fontWeight: '700',
     textAlign: 'center',
-    width: 64,
+    width: 72,
   },
   sendButton: {
     alignItems: 'center',
@@ -1766,7 +1817,7 @@ const createStyles = (palette: AppPalette) => StyleSheet.create({
   },
   learningContent: {
     gap: 14,
-    paddingBottom: 96,
+    paddingBottom: 160,
   },
   panel: {
     backgroundColor: palette.glassStrong,
@@ -1864,6 +1915,7 @@ const createStyles = (palette: AppPalette) => StyleSheet.create({
     borderRadius: 16,
     flexDirection: 'row',
     gap: 6,
+    minHeight: 46,
     padding: 5,
   },
   segmentButton: {

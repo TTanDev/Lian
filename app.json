@@ -5,13 +5,14 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
       "icon": "./assets/ios-icon.png",
       "bundleIdentifier": "com.ttan.exchat",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "恋需要读取你选择的照片、聊天截图和表情包，用来添加到她的学习资料中。",
+        "NSCameraUsageDescription": "恋需要使用相机拍摄照片，用来发送图片或添加到她的学习资料中。",
         "NSUserNotificationsUsageDescription": "恋会使用本地通知发送提前生成的主动消息，不会使用云推送。"
       }
     },

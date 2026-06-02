@@ -21,6 +21,11 @@ export async function pickDocumentSource(defaultType: LearningSourceType = 'docu
 }
 
 export async function pickImageSource(defaultType: LearningSourceType = 'image') {
+  const sources = await pickImageSources(defaultType, 1);
+  return sources[0] ?? null;
+}
+
+export async function pickImageSources(defaultType: LearningSourceType = 'image', limit = 9) {
   const ImagePicker = await import('expo-image-picker');
   const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!permission.granted) {
@@ -29,18 +34,19 @@ export async function pickImageSource(defaultType: LearningSourceType = 'image')
 
   const result = await ImagePicker.launchImageLibraryAsync({
     allowsEditing: false,
+    allowsMultipleSelection: true,
+    selectionLimit: Math.max(1, Math.min(limit, 9)),
     mediaTypes: ImagePicker.MediaTypeOptions.Images,
     quality: 0.92,
   });
 
   if (result.canceled) {
-    return null;
+    return [];
   }
 
-  const asset = result.assets[0];
-  return {
+  return result.assets.slice(0, Math.max(1, Math.min(limit, 9))).map((asset, index) => ({
     localUri: asset.uri,
-    title: asset.fileName || '导入图片',
+    title: asset.fileName || `导入图片 ${index + 1}`,
     type: defaultType,
-  };
+  }));
 }

@@ -23,6 +23,8 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase) {
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL,
       avatar TEXT NOT NULL,
+      avatar_uri TEXT,
+      chat_background_uri TEXT,
       description TEXT NOT NULL,
       mood TEXT NOT NULL,
       temperature INTEGER NOT NULL,
@@ -45,6 +47,7 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase) {
       source TEXT NOT NULL DEFAULT 'normal',
       delay_note TEXT,
       sticker TEXT,
+      image_uris TEXT,
       FOREIGN KEY (ex_id) REFERENCES ex_profiles(id) ON DELETE CASCADE
     );
 
@@ -107,6 +110,9 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase) {
     );
   `);
 
+  await ensureColumn(database, 'ex_profiles', 'avatar_uri', 'TEXT');
+  await ensureColumn(database, 'ex_profiles', 'chat_background_uri', 'TEXT');
+  await ensureColumn(database, 'messages', 'image_uris', 'TEXT');
   await ensureColumn(database, 'proactive_messages', 'notification_id', 'TEXT');
 
   const profileCount = await database.getFirstAsync<{ count: number }>(

@@ -1,6 +1,8 @@
 export type ExProfile = {
   id: string;
   avatar: string;
+  avatarUri?: string;
+  chatBackgroundUri?: string;
   description: string;
   lastMessage: string;
   lastMessageAt: string;
@@ -20,6 +22,7 @@ export type ChatMessage = {
   id: string;
   content: string;
   delayNote?: string;
+  imageUris?: string[];
   role: 'assistant' | 'user';
   sticker?: string;
   time: string;

@@ -31,7 +31,8 @@ export function buildChatPrompt(profile: ExProfileDetail, recentMessages: ChatMe
       content: [
         `发送时间：${message.time}`,
         message.delayNote ? `延迟说明：${message.delayNote}` : null,
-        `消息正文：${message.content}`,
+        `消息正文：${message.content || (message.imageUris?.length ? '[用户发送了图片]' : '')}`,
+        message.imageUris?.length ? `图片数量：${message.imageUris.length} 张` : null,
       ]
         .filter(Boolean)
         .join('\n'),

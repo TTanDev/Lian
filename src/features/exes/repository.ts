@@ -24,7 +24,9 @@ import {
   getWebLearningSources,
   getWebMessages,
   getWebScheduledProactiveMessages,
+  markWebLearningSourcesLearned,
   setWebProactiveNotificationId,
+  updateWebExProfileMedia,
   updateWebSkillProfile,
 } from './webFallback';
 
@@ -32,6 +34,8 @@ type ExProfileRow = {
   id: string;
   name: string;
   avatar: string;
+  avatar_uri: string | null;
+  chat_background_uri: string | null;
   description: string;
   mood: string;
   temperature: number;
@@ -49,15 +53,22 @@ type MessageRow = {
   content: string;
   created_at: number;
   delay_note: string | null;
+  image_uris: string | null;
   sticker: string | null;
 };
 
 type CreateExProfileInput = {
   avatar: string;
+  avatarUri?: string;
   description: string;
   mood: string;
   name: string;
   temperature: number;
+};
+
+type UpdateExProfileMediaInput = {
+  avatarUri?: string | null;
+  chatBackgroundUri?: string | null;
 };
 
 type AddLearningSourceInput = {
@@ -102,7 +113,12 @@ export async function getExProfiles(): Promise<ExProfile[]> {
     SELECT
       ex_profiles.*,
       (
-        SELECT content FROM messages
+        SELECT CASE
+          WHEN content != '' THEN content
+          WHEN image_uris IS NOT NULL THEN '[图片]'
+          ELSE content
+        END
+        FROM messages
         WHERE messages.ex_id = ex_profiles.id
         ORDER BY created_at DESC
         LIMIT 1
@@ -131,7 +147,12 @@ export async function getExProfile(id: string): Promise<ExProfileDetail | null> 
       SELECT
         ex_profiles.*,
         (
-          SELECT content FROM messages
+          SELECT CASE
+            WHEN content != '' THEN content
+            WHEN image_uris IS NOT NULL THEN '[图片]'
+            ELSE content
+          END
+          FROM messages
           WHERE messages.ex_id = ex_profiles.id
           ORDER BY created_at DESC
           LIMIT 1
@@ -159,7 +180,7 @@ export async function getMessages(exId: string): Promise<ChatMessage[]> {
   const database = await getDatabase();
   const rows = await database.getAllAsync<MessageRow>(
     `
-      SELECT id, role, content, created_at, delay_note, sticker
+      SELECT id, role, content, created_at, delay_note, sticker, image_uris
       FROM messages
       WHERE ex_id = ?
       ORDER BY created_at ASC
@@ -173,6 +194,7 @@ export async function getMessages(exId: string): Promise<ChatMessage[]> {
       content: row.content,
       delayNote: row.delay_note ?? undefined,
       id: row.id,
+      imageUris: parseJsonStringArray(row.image_uris),
       role: row.role,
       sticker: row.sticker ?? undefined,
       time: formatMessageTime(row.created_at),
@@ -191,12 +213,13 @@ export async function createExProfile(input: CreateExProfileInput): Promise<ExPr
 
   await database.runAsync(
     `INSERT INTO ex_profiles
-      (id, name, avatar, description, mood, temperature, persona, shared_memories, speech_style, triggers, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, name, avatar, avatar_uri, description, mood, temperature, persona, shared_memories, speech_style, triggers, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       input.name,
       input.avatar,
+      input.avatarUri ?? null,
       input.description,
       input.mood,
       temperature,
@@ -226,20 +249,48 @@ export async function deleteExProfile(id: string) {
   await database.runAsync('DELETE FROM ex_profiles WHERE id = ?', id);
 }
 
-export async function addUserMessage(exId: string, content: string): Promise<ChatMessage> {
+export async function updateExProfileMedia(id: string, input: UpdateExProfileMediaInput) {
   if (Platform.OS === 'web') {
-    return addWebUserMessage(exId, content);
+    return updateWebExProfileMedia(id, input);
+  }
+
+  const database = await getDatabase();
+  const now = Date.now();
+
+  if (input.avatarUri !== undefined) {
+    await database.runAsync(
+      'UPDATE ex_profiles SET avatar_uri = ?, updated_at = ? WHERE id = ?',
+      [input.avatarUri, now, id]
+    );
+  }
+
+  if (input.chatBackgroundUri !== undefined) {
+    await database.runAsync(
+      'UPDATE ex_profiles SET chat_background_uri = ?, updated_at = ? WHERE id = ?',
+      [input.chatBackgroundUri, now, id]
+    );
+  }
+}
+
+export async function addUserMessage(
+  exId: string,
+  content: string,
+  options?: { imageUris?: string[] }
+): Promise<ChatMessage> {
+  if (Platform.OS === 'web') {
+    return addWebUserMessage(exId, content, options);
   }
 
   const database = await getDatabase();
   const now = Date.now();
   const id = `msg-${now.toString(36)}`;
+  const imageUris = normalizeImageUris(options?.imageUris);
 
   await database.withTransactionAsync(async () => {
     await database.runAsync(
-      `INSERT INTO messages (id, ex_id, role, content, created_at, source)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, exId, 'user', content, now, 'normal']
+      `INSERT INTO messages (id, ex_id, role, content, created_at, source, image_uris)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [id, exId, 'user', content, now, 'normal', imageUris.length ? JSON.stringify(imageUris) : null]
     );
     await database.runAsync(
       'UPDATE ex_profiles SET updated_at = ? WHERE id = ?',
@@ -250,6 +301,7 @@ export async function addUserMessage(exId: string, content: string): Promise<Cha
   return {
     content,
     id,
+    imageUris,
     role: 'user',
     time: formatMessageTime(now),
   };
@@ -298,7 +350,7 @@ export async function getRecentMessagesForPrompt(exId: string, limit = 30) {
   const database = await getDatabase();
   const rows = await database.getAllAsync<MessageRow>(
     `
-      SELECT id, role, content, created_at, delay_note, sticker
+      SELECT id, role, content, created_at, delay_note, sticker, image_uris
       FROM messages
       WHERE ex_id = ? AND role IN ('assistant', 'user')
       ORDER BY created_at DESC
@@ -314,6 +366,7 @@ export async function getRecentMessagesForPrompt(exId: string, limit = 30) {
       content: row.content,
       delayNote: row.delay_note ?? undefined,
       id: row.id,
+      imageUris: parseJsonStringArray(row.image_uris),
       role: row.role,
       sticker: row.sticker ?? undefined,
       time: formatMessageTime(row.created_at),
@@ -412,6 +465,21 @@ export async function updateSkillProfile(
       WHERE id = ?
     `,
     [draft.persona, draft.sharedMemories, draft.speechStyle, draft.triggers, now, exId]
+  );
+}
+
+export async function markLearningSourcesLearned(exId: string) {
+  if (Platform.OS === 'web') {
+    return markWebLearningSourcesLearned(exId);
+  }
+
+  const database = await getDatabase();
+  const now = Date.now();
+  await database.runAsync(
+    `UPDATE learning_sources
+     SET status = 'learned', updated_at = ?
+     WHERE ex_id = ? AND status = 'pending'`,
+    [now, exId]
   );
 }
 
@@ -526,9 +594,11 @@ function isVisibleChatMessage(
 function mapExProfileRow(row: ExProfileRow): ExProfile {
   return {
     avatar: row.avatar,
+    avatarUri: row.avatar_uri ?? undefined,
+    chatBackgroundUri: row.chat_background_uri ?? undefined,
     description: row.description,
     id: row.id,
-    lastMessage: row.last_message ?? '还没有消息',
+    lastMessage: row.last_message || '还没有消息',
     lastMessageAt: formatListTime(row.last_message_at),
     mood: row.mood,
     name: row.name,
@@ -565,4 +635,21 @@ function clampTemperature(value: number) {
   }
 
   return Math.max(0, Math.min(100, value));
+}
+
+function normalizeImageUris(imageUris?: string[]) {
+  return (imageUris ?? []).filter(Boolean).slice(0, 9);
+}
+
+function parseJsonStringArray(value: string | null) {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : undefined;
+  } catch {
+    return undefined;
+  }
 }

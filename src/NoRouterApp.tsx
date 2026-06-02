@@ -1,10 +1,11 @@
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
   AppState,
   Easing,
+  Image,
   Keyboard,
   KeyboardAvoidingView,
   PanResponder,
@@ -15,6 +16,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useColorScheme,
   View,
 } from 'react-native';
 
@@ -30,21 +32,34 @@ import {
   getLearningSources,
   getMessages,
   getRecentMessagesForPrompt,
+  markLearningSourcesLearned,
+  updateExProfileMedia,
   updateSkillProfile,
 } from '@/features/exes/repository';
 import { ChatMessage, ExProfile, ExProfileDetail, LearningSource, LearningSourceType } from '@/features/exes/types';
-import { pickDocumentSource, pickImageSource } from '@/features/learning/importers';
+import { pickDocumentSource, pickImageSource, pickImageSources } from '@/features/learning/importers';
 import { buildSkillProfilePrompt, parseSkillProfileDraft } from '@/features/learning/skillProfile';
 import { generateChatReply, generateStructuredText, testOpenAIConnection } from '@/lib/openai/client';
+import { getThemeMode, saveThemeMode, ThemeMode } from '@/lib/settings/appearanceSettings';
 import { ApiSettings, getApiSettings, saveApiSettings } from '@/lib/settings/apiSettings';
-import { palette } from '@/theme/palette';
+import { AppPalette, darkPalette, lightPalette } from '@/theme/palette';
 
 type ScreenState =
   | { name: 'home' }
-  | { name: 'chat'; id: string }
+  | { name: 'chat'; id: string; search?: boolean }
+  | { name: 'chatMenu'; id: string }
   | { name: 'learning'; id: string }
   | { name: 'settings' }
   | { name: 'new' };
+
+type ThemeContextValue = {
+  colors: AppPalette;
+  mode: ThemeMode;
+  setMode: (mode: ThemeMode) => Promise<void>;
+  styles: ReturnType<typeof createStyles>;
+};
+
+const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 const emptySettings: ApiSettings = {
   apiKey: '',
@@ -54,22 +69,48 @@ const emptySettings: ApiSettings = {
 
 export default function NoRouterApp() {
   const [screen, setScreen] = useState<ScreenState>({ name: 'home' });
+  const systemScheme = useColorScheme();
+  const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
+  const isLight = themeMode === 'light' || (themeMode === 'auto' && systemScheme === 'light');
+  const colors = isLight ? lightPalette : darkPalette;
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
+  useEffect(() => {
+    getThemeMode().then(setThemeMode).catch(() => setThemeMode('dark'));
+  }, []);
+
+  async function changeThemeMode(mode: ThemeMode) {
+    setThemeMode(mode);
+    await saveThemeMode(mode);
+  }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="light" />
-      {screen.name === 'home' ? <HomeScreen navigate={setScreen} /> : null}
-      {screen.name === 'chat' ? <ChatScreen id={screen.id} navigate={setScreen} /> : null}
-      {screen.name === 'learning' ? <LearningScreen id={screen.id} navigate={setScreen} /> : null}
-      {screen.name === 'settings' ? <SettingsScreen navigate={setScreen} /> : null}
-      {screen.name === 'new' ? <NewProfileScreen navigate={setScreen} /> : null}
-    </SafeAreaView>
+    <ThemeContext.Provider value={{ colors, mode: themeMode, setMode: changeThemeMode, styles }}>
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar style={isLight ? 'dark' : 'light'} />
+        {screen.name === 'home' ? <HomeScreen navigate={setScreen} /> : null}
+        {screen.name === 'chat' ? <ChatScreen screen={screen} navigate={setScreen} /> : null}
+        {screen.name === 'chatMenu' ? <ChatMenuScreen id={screen.id} navigate={setScreen} /> : null}
+        {screen.name === 'learning' ? <LearningScreen id={screen.id} navigate={setScreen} /> : null}
+        {screen.name === 'settings' ? <SettingsScreen navigate={setScreen} /> : null}
+        {screen.name === 'new' ? <NewProfileScreen navigate={setScreen} /> : null}
+      </SafeAreaView>
+    </ThemeContext.Provider>
   );
 }
 
+function useAppTheme() {
+  const value = useContext(ThemeContext);
+  if (!value) {
+    throw new Error('Theme context is missing');
+  }
+
+  return value;
+}
+
 function HomeScreen({ navigate }: { navigate: (screen: ScreenState) => void }) {
+  const { styles } = useAppTheme();
   const [profiles, setProfiles] = useState<ExProfile[]>([]);
-  const [deleteTarget, setDeleteTarget] = useState<ExProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -89,20 +130,6 @@ function HomeScreen({ navigate }: { navigate: (screen: ScreenState) => void }) {
   useEffect(() => {
     load();
   }, []);
-
-  async function confirmDelete() {
-    if (!deleteTarget) {
-      return;
-    }
-
-    try {
-      await deleteExProfile(deleteTarget.id);
-      setDeleteTarget(null);
-      await load();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '删除失败');
-    }
-  }
 
   return (
     <ScreenFrame>
@@ -124,13 +151,10 @@ function HomeScreen({ navigate }: { navigate: (screen: ScreenState) => void }) {
         {profiles.map((profile, index) => (
           <StaggeredItem key={profile.id} index={index}>
           <PressableScale
-            onLongPress={() => setDeleteTarget(profile)}
             onPress={() => navigate({ name: 'chat', id: profile.id })}
           >
             <View style={styles.card}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{profile.avatar}</Text>
-              </View>
+              <Avatar profile={profile} size={54} />
               <View style={styles.cardBody}>
                 <View style={styles.row}>
                   <Text style={styles.name}>{profile.name}</Text>
@@ -146,37 +170,26 @@ function HomeScreen({ navigate }: { navigate: (screen: ScreenState) => void }) {
           </StaggeredItem>
         ))}
       </ScrollView>
-
-      {deleteTarget ? (
-        <View style={styles.deleteBar}>
-          <Text style={styles.deleteText}>删除「{deleteTarget.name}」和所有聊天记录？</Text>
-          <View style={styles.deleteActions}>
-            <PressableScale onPress={() => setDeleteTarget(null)} style={styles.cancelDeleteButton}>
-              <Text style={styles.deleteButtonText}>取消</Text>
-            </PressableScale>
-            <PressableScale onPress={confirmDelete} style={styles.confirmDeleteButton}>
-              <Text style={styles.deleteButtonText}>删除</Text>
-            </PressableScale>
-          </View>
-        </View>
-      ) : null}
     </ScreenFrame>
   );
 }
 
 function ChatScreen({
-  id,
+  screen,
   navigate,
 }: {
-  id: string;
+  screen: Extract<ScreenState, { name: 'chat' }>;
   navigate: (screen: ScreenState) => void;
 }) {
+  const { colors, styles } = useAppTheme();
+  const { id } = screen;
   const [profile, setProfile] = useState<ExProfileDetail | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [selectedImages, setSelectedImages] = useState<string[]>([]);
+  const [toolPanel, setToolPanel] = useState<'emoji' | 'plus' | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchVisible, setSearchVisible] = useState(false);
+  const [searchVisible, setSearchVisible] = useState(Boolean(screen.search));
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -221,6 +234,12 @@ function ChatScreen({
   }, [id]);
 
   useEffect(() => {
+    if (screen.search) {
+      setSearchVisible(true);
+    }
+  }, [screen.search]);
+
+  useEffect(() => {
     scrollToBottom(false);
   }, [messages.length, searchQuery]);
 
@@ -239,7 +258,7 @@ function ChatScreen({
 
   async function send() {
     const content = draft.trim();
-    if (!content || !profile || sending) {
+    if ((!content && selectedImages.length === 0) || !profile || sending) {
       return;
     }
 
@@ -247,7 +266,10 @@ function ChatScreen({
       setSending(true);
       setError(null);
       setDraft('');
-      const userMessage = await addUserMessage(id, content);
+      const imageUris = selectedImages;
+      setSelectedImages([]);
+      setToolPanel(null);
+      const userMessage = await addUserMessage(id, content, { imageUris });
       setMessages((current) => [...current, userMessage]);
       scrollToBottom();
       const [settings, recentMessages] = await Promise.all([
@@ -270,49 +292,50 @@ function ChatScreen({
     }
   }
 
+  async function pickChatImages() {
+    try {
+      Keyboard.dismiss();
+      const picked = await pickImageSources('image', 9 - selectedImages.length);
+      if (picked.length) {
+        setSelectedImages((current) => [
+          ...current,
+          ...picked.map((item) => item.localUri),
+        ].slice(0, 9));
+        setToolPanel(null);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '选择图片失败');
+    }
+  }
+
+  function appendEmoji(emoji: string) {
+    setDraft((current) => `${current}${emoji}`);
+  }
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={styles.flex}
     >
       <ScreenFrame compact onSwipeBack={() => navigate({ name: 'home' })}>
+        {profile?.chatBackgroundUri ? (
+          <Image source={{ uri: profile.chatBackgroundUri }} style={styles.chatBackgroundImage} />
+        ) : null}
         <View style={styles.chatHeader}>
           <RoundButton label="‹" onPress={() => navigate({ name: 'home' })} />
           <View style={styles.chatTitleBox}>
             <Text style={styles.name}>{profile?.name ?? '她'}</Text>
             <Text style={styles.metaText}>
-              {profile ? `关系温度 ${profile.temperature} · ${profile.mood}` : '正在读取...'}
+              {sending ? '对方正在输入中' : profile ? `关系温度 ${profile.temperature} · ${profile.mood}` : '正在读取...'}
             </Text>
           </View>
-          <RoundButton label="⋯" onPress={() => setMenuOpen((current) => !current)} />
+          <RoundButton label="⋯" onPress={() => navigate({ name: 'chatMenu', id })} />
         </View>
-        {menuOpen ? (
-          <View style={styles.moreMenu}>
-            <PressableScale
-              onPress={() => {
-                setSearchVisible((current) => !current);
-                setSearchQuery('');
-              }}
-              style={styles.menuAction}
-            >
-              <Text style={styles.menuActionText}>{searchVisible ? '关闭搜索' : '搜索聊天记录'}</Text>
-            </PressableScale>
-            <PressableScale
-              onPress={() => {
-                Keyboard.dismiss();
-                navigate({ name: 'learning', id });
-              }}
-              style={styles.menuAction}
-            >
-              <Text style={styles.menuActionText}>学习资料</Text>
-            </PressableScale>
-          </View>
-        ) : null}
         {searchVisible ? (
           <TextInput
             onChangeText={setSearchQuery}
             placeholder="搜索聊天记录..."
-            placeholderTextColor={palette.muted}
+            placeholderTextColor={colors.muted}
             style={styles.searchInput}
             value={searchQuery}
           />
@@ -336,38 +359,179 @@ function ChatScreen({
         >
           {filteredMessages.map((message, index) => (
             <StaggeredItem key={message.id} index={index} compact>
-            <Animated.View
-              key={message.id}
-              style={[
-                styles.bubble,
-                message.role === 'user' ? styles.userBubble : styles.assistantBubble,
-              ]}
-            >
-              <Text style={styles.bubbleText}>{displayMessageContent(message)}</Text>
-              <Text style={styles.bubbleTime}>{message.time}</Text>
-            </Animated.View>
+              <MessageBubble message={message} />
             </StaggeredItem>
           ))}
           {searchQuery.trim() && filteredMessages.length === 0 ? (
             <Text style={styles.emptySearchText}>没有找到相关聊天记录。</Text>
           ) : null}
-          {sending ? <LoadingLine text="她正在想怎么回..." /> : null}
         </ScrollView>
 
         <View style={styles.composer}>
+          <PressableScale onPress={() => setToolPanel((current) => current === 'plus' ? null : 'plus')} style={styles.composerIconButton}>
+            <Text style={styles.composerIconText}>+</Text>
+          </PressableScale>
           <TextInput
             onChangeText={setDraft}
             placeholder="说点什么..."
-            placeholderTextColor={palette.muted}
+            placeholderTextColor={colors.muted}
             style={styles.input}
             value={draft}
           />
-          <PressableScale disabled={!draft.trim() || sending} onPress={send} style={styles.sendButton}>
-            <Text style={styles.sendButtonText}>发</Text>
+          <PressableScale onPress={() => setToolPanel((current) => current === 'emoji' ? null : 'emoji')} style={styles.composerIconButton}>
+            <Text style={styles.composerIconText}>☺</Text>
           </PressableScale>
+          {draft.trim() || selectedImages.length ? (
+            <PressableScale disabled={sending} onPress={send} style={styles.sendButton}>
+              <Text style={styles.sendButtonText}>发</Text>
+            </PressableScale>
+          ) : null}
         </View>
+        {selectedImages.length ? (
+          <View style={styles.selectedImageStrip}>
+            {selectedImages.map((uri, index) => (
+              <PressableScale
+                key={`${uri}-${index}`}
+                onPress={() => setSelectedImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                style={styles.selectedImageItem}
+              >
+                <Image source={{ uri }} style={styles.selectedImageThumb} />
+                <Text style={styles.selectedImageRemove}>×</Text>
+              </PressableScale>
+            ))}
+          </View>
+        ) : null}
+        {toolPanel === 'emoji' ? (
+          <View style={styles.toolPanel}>
+            {['🙂', '😒', '🥺', '😂', '😉', '😤', '😭', '🫠', '❤️', '👌'].map((emoji) => (
+              <PressableScale key={emoji} onPress={() => appendEmoji(emoji)} style={styles.emojiButton}>
+                <Text style={styles.emojiText}>{emoji}</Text>
+              </PressableScale>
+            ))}
+          </View>
+        ) : null}
+        {toolPanel === 'plus' ? (
+          <View style={styles.toolPanel}>
+            <ToolTile label="照片" icon="▧" onPress={pickChatImages} />
+            <ToolTile label="拍摄" icon="○" onPress={pickChatImages} />
+            <ToolTile label="表情" icon="☺" onPress={() => setToolPanel('emoji')} />
+            <ToolTile label="资料" icon="※" onPress={() => navigate({ name: 'learning', id })} />
+          </View>
+        ) : null}
       </ScreenFrame>
     </KeyboardAvoidingView>
+  );
+}
+
+function ChatMenuScreen({
+  id,
+  navigate,
+}: {
+  id: string;
+  navigate: (screen: ScreenState) => void;
+}) {
+  const { styles } = useAppTheme();
+  const [profile, setProfile] = useState<ExProfileDetail | null>(null);
+  const [status, setStatus] = useState('聊天设置只影响当前这个她。');
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  async function load() {
+    setProfile(await getExProfile(id));
+  }
+
+  useEffect(() => {
+    load().catch((caught) => setStatus(caught instanceof Error ? caught.message : '读取菜单失败'));
+  }, [id]);
+
+  async function pickAvatar() {
+    try {
+      const picked = await pickImageSource('image');
+      if (!picked) {
+        setStatus('已取消选择头像。');
+        return;
+      }
+
+      await updateExProfileMedia(id, { avatarUri: picked.localUri });
+      await load();
+      setStatus('头像已更新。');
+    } catch (caught) {
+      setStatus(caught instanceof Error ? caught.message : '更新头像失败');
+    }
+  }
+
+  async function pickBackground() {
+    try {
+      const picked = await pickImageSource('image');
+      if (!picked) {
+        setStatus('已取消选择背景。');
+        return;
+      }
+
+      await updateExProfileMedia(id, { chatBackgroundUri: picked.localUri });
+      await load();
+      setStatus('聊天背景已更新。');
+    } catch (caught) {
+      setStatus(caught instanceof Error ? caught.message : '更新背景失败');
+    }
+  }
+
+  async function removeBackground() {
+    await updateExProfileMedia(id, { chatBackgroundUri: null });
+    await load();
+    setStatus('聊天背景已恢复默认。');
+  }
+
+  async function confirmDelete() {
+    try {
+      await deleteExProfile(id);
+      navigate({ name: 'home' });
+    } catch (caught) {
+      setStatus(caught instanceof Error ? caught.message : '删除失败');
+    }
+  }
+
+  return (
+    <ScreenFrame onSwipeBack={() => navigate({ name: 'chat', id })}>
+      <View style={styles.chatHeader}>
+        <RoundButton label="‹" onPress={() => navigate({ name: 'chat', id })} />
+        <View style={styles.chatTitleBox}>
+          <Text style={styles.titleSmall}>聊天设置</Text>
+          <Text style={styles.metaText}>{profile?.name ?? '她'}</Text>
+        </View>
+      </View>
+
+      <View style={styles.profileSummary}>
+        {profile ? <Avatar profile={profile} size={62} /> : null}
+        <View style={styles.cardBody}>
+          <Text style={styles.name}>{profile?.name ?? '她'}</Text>
+          <Text style={styles.metaText}>关系温度 {profile?.temperature ?? 50} · {profile?.mood ?? '读取中'}</Text>
+        </View>
+      </View>
+
+      <View style={styles.menuPageList}>
+        <MenuRow title="搜索聊天记录" detail="进入聊天页后显示搜索框" onPress={() => navigate({ name: 'chat', id, search: true })} />
+        <MenuRow title="学习资料" detail="导入资料、查看和细调 Skill 档案" onPress={() => navigate({ name: 'learning', id })} />
+        <MenuRow title="更换头像" detail="不选头像时继续显示首字" onPress={pickAvatar} />
+        <MenuRow title="自定义聊天背景" detail={profile?.chatBackgroundUri ? '已设置，可继续更换' : '从相册选择一张背景图'} onPress={pickBackground} />
+        {profile?.chatBackgroundUri ? <MenuRow title="恢复默认背景" detail="移除当前聊天背景" onPress={removeBackground} /> : null}
+        <MenuRow title="删除她" detail="删除角色、聊天记录和资料" danger onPress={() => setConfirmingDelete(true)} />
+      </View>
+
+      <Text style={styles.statusText}>{status}</Text>
+      {confirmingDelete ? (
+        <View style={styles.deleteBar}>
+          <Text style={styles.deleteText}>确认删除「{profile?.name ?? '她'}」？聊天记录和学习资料也会一起删除。</Text>
+          <View style={styles.deleteActions}>
+            <PressableScale onPress={() => setConfirmingDelete(false)} style={styles.cancelDeleteButton}>
+              <Text style={styles.deleteButtonText}>取消</Text>
+            </PressableScale>
+            <PressableScale onPress={confirmDelete} style={styles.confirmDeleteButton}>
+              <Text style={styles.deleteButtonText}>删除</Text>
+            </PressableScale>
+          </View>
+        </View>
+      ) : null}
+    </ScreenFrame>
   );
 }
 
@@ -378,9 +542,16 @@ function LearningScreen({
   id: string;
   navigate: (screen: ScreenState) => void;
 }) {
+  const { colors, styles } = useAppTheme();
   const [profile, setProfile] = useState<ExProfileDetail | null>(null);
   const [sources, setSources] = useState<LearningSource[]>([]);
   const [manualText, setManualText] = useState('');
+  const [skillDraft, setSkillDraft] = useState({
+    persona: '',
+    sharedMemories: '',
+    speechStyle: '',
+    triggers: '',
+  });
   const [status, setStatus] = useState('资料会先保存在本机，学习时再发送必要片段给模型。');
   const [loading, setLoading] = useState(true);
   const [learning, setLearning] = useState(false);
@@ -394,6 +565,14 @@ function LearningScreen({
       ]);
       setProfile(nextProfile);
       setSources(nextSources);
+      if (nextProfile) {
+        setSkillDraft({
+          persona: nextProfile.persona,
+          sharedMemories: nextProfile.sharedMemories,
+          speechStyle: nextProfile.speechStyle,
+          triggers: nextProfile.triggers,
+        });
+      }
     } catch (caught) {
       setStatus(caught instanceof Error ? caught.message : '读取学习资料失败');
     } finally {
@@ -431,21 +610,25 @@ function LearningScreen({
   async function importImage(type: LearningSourceType) {
     try {
       setStatus('正在选择图片...');
-      const picked = await pickImageSource(type);
-      if (!picked) {
+      const picked = await pickImageSources(type, 9);
+      if (!picked.length) {
         setStatus('已取消导入。');
         return;
       }
 
-      await addLearningSource({
-        exId: id,
-        localUri: picked.localUri,
-        summary: '等待多模态模型分析。',
-        title: picked.title,
-        type: picked.type,
-      });
+      await Promise.all(
+        picked.map((item) =>
+          addLearningSource({
+            exId: id,
+            localUri: item.localUri,
+            summary: '已导入，生成 Skill 档案时会作为图片资料交给模型参考。',
+            title: item.title,
+            type: item.type,
+          })
+        )
+      );
       await load();
-      setStatus('图片已加入学习资料。');
+      setStatus(`已导入 ${picked.length} 张图片。现在还没有单独分析，点击“生成 Skill 档案”后会统一整合。`);
     } catch (caught) {
       setStatus(caught instanceof Error ? caught.message : '导入失败');
     }
@@ -482,7 +665,8 @@ function LearningScreen({
       const prompt = buildSkillProfilePrompt(profile, sources);
       const response = await generateStructuredText(settings, prompt);
       const draft = parseSkillProfileDraft(response);
-      await updateSkillProfile(id, draft);
+      await updateSkillProfile(id, mergeSkillDraft(profile, draft));
+      await markLearningSourcesLearned(id);
       await load();
       setStatus('Skill 档案已更新，会影响后续聊天语气。');
     } catch (caught) {
@@ -490,6 +674,16 @@ function LearningScreen({
     } finally {
       setLearning(false);
     }
+  }
+
+  async function saveSkillDraft() {
+    if (!profile) {
+      return;
+    }
+
+    await updateSkillProfile(id, mergeSkillDraft(profile, skillDraft));
+    await load();
+    setStatus('Skill 档案已手动保存。');
   }
 
   return (
@@ -528,7 +722,7 @@ function LearningScreen({
             multiline
             onChangeText={setManualText}
             placeholder="补充她的性格、口头禅、雷点、你们之间发生过的事..."
-            placeholderTextColor={palette.muted}
+            placeholderTextColor={colors.muted}
             style={[styles.fieldInput, styles.fieldInputMultiline]}
             value={manualText}
           />
@@ -542,6 +736,34 @@ function LearningScreen({
           <Text style={styles.panelBody}>{status}</Text>
           <PressableScale disabled={learning} onPress={startLearning} style={styles.primaryAction}>
             <Text style={styles.primaryActionText}>{learning ? '学习中...' : '生成 Skill 档案'}</Text>
+          </PressableScale>
+        </View>
+
+        <View style={styles.panel}>
+          <Text style={styles.panelTitle}>Skill 档案</Text>
+          <Text style={styles.panelBody}>这里可以查看和细调生成后的设定。保存时会与现有档案整合，不会因为某个字段为空就抹掉旧内容。</Text>
+          <SkillField
+            label="人格底色"
+            onChangeText={(persona) => setSkillDraft((current) => ({ ...current, persona }))}
+            value={skillDraft.persona}
+          />
+          <SkillField
+            label="共同记忆"
+            onChangeText={(sharedMemories) => setSkillDraft((current) => ({ ...current, sharedMemories }))}
+            value={skillDraft.sharedMemories}
+          />
+          <SkillField
+            label="说话习惯"
+            onChangeText={(speechStyle) => setSkillDraft((current) => ({ ...current, speechStyle }))}
+            value={skillDraft.speechStyle}
+          />
+          <SkillField
+            label="雷点边界"
+            onChangeText={(triggers) => setSkillDraft((current) => ({ ...current, triggers }))}
+            value={skillDraft.triggers}
+          />
+          <PressableScale onPress={saveSkillDraft} style={styles.secondaryAction}>
+            <Text style={styles.primaryActionText}>保存细调</Text>
           </PressableScale>
         </View>
 
@@ -564,6 +786,7 @@ function LearningScreen({
 }
 
 function SettingsScreen({ navigate }: { navigate: (screen: ScreenState) => void }) {
+  const { mode, setMode, styles } = useAppTheme();
   const [settings, setSettings] = useState<ApiSettings>(emptySettings);
   const [status, setStatus] = useState('API 地址、Key 和模型只保存在本机。');
   const [saving, setSaving] = useState(false);
@@ -634,6 +857,25 @@ function SettingsScreen({ navigate }: { navigate: (screen: ScreenState) => void 
         value={settings.model}
       />
 
+      <View style={styles.panel}>
+        <Text style={styles.panelTitle}>外观</Text>
+        <View style={styles.segmented}>
+          {([
+            ['dark', '深色'],
+            ['light', '浅色'],
+            ['auto', '自动'],
+          ] as const).map(([value, label]) => (
+            <PressableScale
+              key={value}
+              onPress={() => setMode(value)}
+              style={[styles.segmentButton, mode === value && styles.segmentButtonActive]}
+            >
+              <Text style={[styles.segmentText, mode === value && styles.segmentTextActive]}>{label}</Text>
+            </PressableScale>
+          ))}
+        </View>
+      </View>
+
       <Text style={styles.statusText}>{status}</Text>
       <View style={styles.actionRow}>
         <PressableScale disabled={saving} onPress={save} style={styles.primaryAction}>
@@ -648,7 +890,9 @@ function SettingsScreen({ navigate }: { navigate: (screen: ScreenState) => void 
 }
 
 function NewProfileScreen({ navigate }: { navigate: (screen: ScreenState) => void }) {
+  const { styles } = useAppTheme();
   const [name, setName] = useState('');
+  const [avatarUri, setAvatarUri] = useState<string | undefined>();
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState('先添加一个“她”，之后再导入资料学习。');
   const [saving, setSaving] = useState(false);
@@ -663,6 +907,7 @@ function NewProfileScreen({ navigate }: { navigate: (screen: ScreenState) => voi
       setSaving(true);
       const created = await createExProfile({
         avatar: name.trim().slice(0, 1),
+        avatarUri,
         description: description.trim() || '等待补充资料学习。',
         mood: '平静',
         name: name.trim(),
@@ -673,6 +918,18 @@ function NewProfileScreen({ navigate }: { navigate: (screen: ScreenState) => voi
       setStatus(caught instanceof Error ? caught.message : '创建失败');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function pickAvatarForNewProfile() {
+    try {
+      const picked = await pickImageSource('image');
+      if (picked) {
+        setAvatarUri(picked.localUri);
+        setStatus('头像已选择。不选也没关系，会默认显示首字。');
+      }
+    } catch (caught) {
+      setStatus(caught instanceof Error ? caught.message : '选择头像失败');
     }
   }
 
@@ -687,6 +944,10 @@ function NewProfileScreen({ navigate }: { navigate: (screen: ScreenState) => voi
       </View>
 
       <Field label="名字" onChangeText={setName} placeholder="比如：林雨" value={name} />
+      <PressableScale onPress={pickAvatarForNewProfile} style={styles.secondaryAction}>
+        <Text style={styles.primaryActionText}>{avatarUri ? '更换头像' : '选择头像'}</Text>
+      </PressableScale>
+      {avatarUri ? <Image source={{ uri: avatarUri }} style={styles.avatarPreview} /> : null}
       <Field
         label="主观描述"
         multiline
@@ -711,6 +972,7 @@ function ScreenFrame({
   compact?: boolean;
   onSwipeBack?: () => void;
 }) {
+  const { styles } = useAppTheme();
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(14)).current;
   const panResponder = useRef(
@@ -768,11 +1030,12 @@ function Field({
 }: {
   label: string;
 } & React.ComponentProps<typeof TextInput>) {
+  const { colors, styles } = useAppTheme();
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <TextInput
-        placeholderTextColor={palette.muted}
+        placeholderTextColor={colors.muted}
         style={[styles.fieldInput, props.multiline && styles.fieldInputMultiline]}
         {...props}
       />
@@ -781,6 +1044,7 @@ function Field({
 }
 
 function LoadingLine({ text }: { text: string }) {
+  const { colors, styles } = useAppTheme();
   const opacity = useRef(new Animated.Value(0.35)).current;
 
   useEffect(() => {
@@ -806,7 +1070,7 @@ function LoadingLine({ text }: { text: string }) {
 
   return (
     <Animated.View style={[styles.loadingLine, { opacity }]}>
-      <ActivityIndicator color={palette.accent} size="small" />
+      <ActivityIndicator color={colors.accent} size="small" />
       <Text style={styles.stateText}>{text}</Text>
     </Animated.View>
   );
@@ -821,6 +1085,7 @@ function RoundButton({
   onPress: () => void;
   primary?: boolean;
 }) {
+  const { styles } = useAppTheme();
   return (
     <PressableScale onPress={onPress} style={[styles.roundButton, primary && styles.roundButtonPrimary]}>
       <Text style={styles.roundButtonText}>{label}</Text>
@@ -842,6 +1107,144 @@ function displayMessageContent(message: ChatMessage) {
   return message.role === 'assistant' ? cleanupChatReply(message.content) : message.content;
 }
 
+function MessageBubble({ message }: { message: ChatMessage }) {
+  const { styles } = useAppTheme();
+  const pop = useRef(new Animated.Value(0.92)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  const content = displayMessageContent(message);
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(pop, {
+        damping: 14,
+        mass: 0.8,
+        stiffness: 210,
+        toValue: 1,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacity, {
+        duration: 180,
+        easing: Easing.out(Easing.cubic),
+        toValue: 1,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [opacity, pop]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.bubble,
+        message.role === 'user' ? styles.userBubble : styles.assistantBubble,
+        { opacity, transform: [{ scale: pop }] },
+      ]}
+    >
+      {message.imageUris?.length ? (
+        <View style={styles.messageImageGrid}>
+          {message.imageUris.map((uri, index) => (
+            <Image key={`${uri}-${index}`} source={{ uri }} style={styles.messageImage} />
+          ))}
+        </View>
+      ) : null}
+      {content ? <Text style={styles.bubbleText}>{content}</Text> : null}
+      <Text style={styles.bubbleTime}>{message.time}</Text>
+    </Animated.View>
+  );
+}
+
+function Avatar({ profile, size }: { profile: Pick<ExProfile, 'avatar' | 'avatarUri'>; size: number }) {
+  const { styles } = useAppTheme();
+  const radius = Math.round(size * 0.44);
+
+  if (profile.avatarUri) {
+    return <Image source={{ uri: profile.avatarUri }} style={[styles.avatarImage, { borderRadius: radius, height: size, width: size }]} />;
+  }
+
+  return (
+    <View style={[styles.avatar, { borderRadius: radius, height: size, width: size }]}>
+      <Text style={styles.avatarText}>{profile.avatar}</Text>
+    </View>
+  );
+}
+
+function MenuRow({
+  danger,
+  detail,
+  onPress,
+  title,
+}: {
+  danger?: boolean;
+  detail: string;
+  onPress: () => void;
+  title: string;
+}) {
+  const { styles } = useAppTheme();
+
+  return (
+    <PressableScale onPress={onPress} style={styles.menuPageRow}>
+      <View style={styles.cardBody}>
+        <Text style={[styles.menuPageTitle, danger && styles.dangerText]}>{title}</Text>
+        <Text style={styles.metaText}>{detail}</Text>
+      </View>
+      <Text style={styles.menuArrow}>›</Text>
+    </PressableScale>
+  );
+}
+
+function ToolTile({ icon, label, onPress }: { icon: string; label: string; onPress: () => void }) {
+  const { styles } = useAppTheme();
+
+  return (
+    <PressableScale onPress={onPress} style={styles.toolTile}>
+      <Text style={styles.toolIcon}>{icon}</Text>
+      <Text style={styles.toolLabel}>{label}</Text>
+    </PressableScale>
+  );
+}
+
+function SkillField({
+  label,
+  onChangeText,
+  value,
+}: {
+  label: string;
+  onChangeText: (value: string) => void;
+  value: string;
+}) {
+  const { colors, styles } = useAppTheme();
+
+  return (
+    <View style={styles.skillField}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TextInput
+        multiline
+        onChangeText={onChangeText}
+        placeholder="等待学习资料生成..."
+        placeholderTextColor={colors.muted}
+        style={[styles.fieldInput, styles.skillInput]}
+        value={value}
+      />
+    </View>
+  );
+}
+
+function mergeSkillDraft(
+  profile: ExProfileDetail,
+  draft: {
+    persona: string;
+    sharedMemories: string;
+    speechStyle: string;
+    triggers: string;
+  }
+) {
+  return {
+    persona: draft.persona.trim() || profile.persona,
+    sharedMemories: draft.sharedMemories.trim() || profile.sharedMemories,
+    speechStyle: draft.speechStyle.trim() || profile.speechStyle,
+    triggers: draft.triggers.trim() || profile.triggers,
+  };
+}
+
 function PressableScale({
   children,
   disabled,
@@ -855,6 +1258,7 @@ function PressableScale({
   onPress: () => void;
   style?: React.ComponentProps<typeof Pressable>['style'];
 }) {
+  const { styles } = useAppTheme();
   const scale = useRef(new Animated.Value(1)).current;
 
   function animate(toValue: number, duration: number) {
@@ -925,7 +1329,7 @@ function StaggeredItem({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (palette: AppPalette) => StyleSheet.create({
   safeArea: {
     backgroundColor: palette.background,
     flex: 1,
@@ -940,6 +1344,14 @@ const styles = StyleSheet.create({
   },
   screenCompact: {
     paddingBottom: 10,
+  },
+  chatBackgroundImage: {
+    bottom: 0,
+    left: 0,
+    opacity: 0.18,
+    position: 'absolute',
+    right: 0,
+    top: 0,
   },
   header: {
     alignItems: 'center',
@@ -988,6 +1400,15 @@ const styles = StyleSheet.create({
     height: 54,
     justifyContent: 'center',
     width: 54,
+  },
+  avatarImage: {
+    backgroundColor: palette.avatar,
+  },
+  avatarPreview: {
+    borderRadius: 18,
+    height: 88,
+    marginBottom: 14,
+    width: 88,
   },
   avatarText: {
     color: palette.text,
@@ -1116,11 +1537,98 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
+  composerIconButton: {
+    alignItems: 'center',
+    backgroundColor: palette.input,
+    borderColor: palette.stroke,
+    borderRadius: 16,
+    borderWidth: 1,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  composerIconText: {
+    color: palette.text,
+    fontSize: 20,
+    fontWeight: '800',
+  },
   input: {
     color: palette.text,
     flex: 1,
     fontSize: 15,
     minHeight: 36,
+  },
+  selectedImageStrip: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingTop: 8,
+  },
+  selectedImageItem: {
+    position: 'relative',
+  },
+  selectedImageThumb: {
+    borderRadius: 12,
+    height: 54,
+    width: 54,
+  },
+  selectedImageRemove: {
+    backgroundColor: palette.backgroundAlt,
+    borderRadius: 9,
+    color: palette.text,
+    fontSize: 12,
+    fontWeight: '800',
+    height: 18,
+    lineHeight: 18,
+    position: 'absolute',
+    right: -5,
+    textAlign: 'center',
+    top: -5,
+    width: 18,
+  },
+  toolPanel: {
+    backgroundColor: palette.backgroundAlt,
+    borderTopColor: palette.stroke,
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginHorizontal: -22,
+    marginTop: 10,
+    paddingHorizontal: 22,
+    paddingVertical: 18,
+  },
+  emojiButton: {
+    alignItems: 'center',
+    backgroundColor: palette.input,
+    borderRadius: 18,
+    height: 42,
+    justifyContent: 'center',
+    width: 42,
+  },
+  emojiText: {
+    fontSize: 24,
+  },
+  toolTile: {
+    alignItems: 'center',
+    gap: 8,
+    width: '22%',
+  },
+  toolIcon: {
+    backgroundColor: palette.input,
+    borderRadius: 16,
+    color: palette.text,
+    fontSize: 24,
+    height: 58,
+    lineHeight: 58,
+    overflow: 'hidden',
+    textAlign: 'center',
+    width: 58,
+  },
+  toolLabel: {
+    color: palette.subtle,
+    fontSize: 12,
+    fontWeight: '700',
   },
   sendButton: {
     alignItems: 'center',
@@ -1159,6 +1667,14 @@ const styles = StyleSheet.create({
   },
   fieldInputMultiline: {
     minHeight: 112,
+    paddingTop: 12,
+    textAlignVertical: 'top',
+  },
+  skillField: {
+    gap: 7,
+  },
+  skillInput: {
+    minHeight: 82,
     paddingTop: 12,
     textAlignVertical: 'top',
   },
@@ -1217,6 +1733,81 @@ const styles = StyleSheet.create({
     color: palette.subtle,
     fontSize: 13,
     lineHeight: 19,
+  },
+  profileSummary: {
+    alignItems: 'center',
+    backgroundColor: palette.glassStrong,
+    borderColor: palette.stroke,
+    borderRadius: 20,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 14,
+    marginBottom: 16,
+    padding: 16,
+  },
+  menuPageList: {
+    gap: 10,
+    marginBottom: 16,
+  },
+  menuPageRow: {
+    alignItems: 'center',
+    backgroundColor: palette.glassStrong,
+    borderColor: palette.stroke,
+    borderRadius: 18,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 64,
+    padding: 14,
+  },
+  menuPageTitle: {
+    color: palette.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  menuArrow: {
+    color: palette.muted,
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  dangerText: {
+    color: palette.accentSoft,
+  },
+  segmented: {
+    backgroundColor: palette.input,
+    borderRadius: 16,
+    flexDirection: 'row',
+    gap: 6,
+    padding: 5,
+  },
+  segmentButton: {
+    alignItems: 'center',
+    borderRadius: 12,
+    flex: 1,
+    minHeight: 36,
+    justifyContent: 'center',
+  },
+  segmentButtonActive: {
+    backgroundColor: palette.accent,
+  },
+  segmentText: {
+    color: palette.subtle,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  segmentTextActive: {
+    color: palette.text,
+  },
+  messageImageGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 6,
+  },
+  messageImage: {
+    borderRadius: 12,
+    height: 108,
+    width: 108,
   },
   loadingLine: {
     alignItems: 'center',

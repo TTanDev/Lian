@@ -4,6 +4,8 @@ const webExProfiles: ExProfileDetail[] = [
   {
     id: 'rain',
     avatar: '林',
+    avatarUri: undefined,
+    chatBackgroundUri: undefined,
     description: '会嘴硬，但很在意回复速度。生气时会先冷下来，再用很短的话试探。',
     lastMessage: '你现在才回我啊？',
     lastMessageAt: '23:46',
@@ -18,6 +20,8 @@ const webExProfiles: ExProfileDetail[] = [
   {
     id: 'moon',
     avatar: '月',
+    avatarUri: undefined,
+    chatBackgroundUri: undefined,
     description: '平时温柔，吵架时会沉默。喜欢用表情包缓和气氛。',
     lastMessage: '算了，你忙吧。',
     lastMessageAt: '昨天',
@@ -81,6 +85,7 @@ export function getWebMessages(exId: string) {
 
 export function createWebExProfile(input: {
   avatar: string;
+  avatarUri?: string;
   description: string;
   mood: string;
   name: string;
@@ -90,6 +95,8 @@ export function createWebExProfile(input: {
   const profile: ExProfileDetail = {
     id,
     avatar: input.avatar,
+    avatarUri: input.avatarUri,
+    chatBackgroundUri: undefined,
     description: input.description,
     lastMessage: '还没有消息',
     lastMessageAt: '',
@@ -119,6 +126,24 @@ export function deleteWebExProfile(id: string) {
   delete webMessages[id];
   delete webLearningSources[id];
   delete webProactiveMessages[id];
+}
+
+export function updateWebExProfileMedia(
+  id: string,
+  input: { avatarUri?: string | null; chatBackgroundUri?: string | null }
+) {
+  const profile = webExProfiles.find((item) => item.id === id);
+  if (!profile) {
+    return;
+  }
+
+  if (input.avatarUri !== undefined) {
+    profile.avatarUri = input.avatarUri ?? undefined;
+  }
+
+  if (input.chatBackgroundUri !== undefined) {
+    profile.chatBackgroundUri = input.chatBackgroundUri ?? undefined;
+  }
 }
 
 export function addWebLearningSource(input: {
@@ -169,11 +194,23 @@ export function updateWebSkillProfile(
   profile.triggers = draft.triggers;
 }
 
-export function addWebUserMessage(exId: string, content: string): ChatMessage {
+export function markWebLearningSourcesLearned(exId: string) {
+  webLearningSources[exId] = (webLearningSources[exId] ?? []).map((source) => ({
+    ...source,
+    status: source.status === 'pending' ? 'learned' : source.status,
+  }));
+}
+
+export function addWebUserMessage(
+  exId: string,
+  content: string,
+  options?: { imageUris?: string[] }
+): ChatMessage {
   const now = new Date();
   const message: ChatMessage = {
     content,
     id: `web-msg-${Date.now().toString(36)}`,
+    imageUris: options?.imageUris?.slice(0, 9),
     role: 'user',
     time: now.toLocaleTimeString('zh-CN', {
       hour: '2-digit',
@@ -186,7 +223,7 @@ export function addWebUserMessage(exId: string, content: string): ChatMessage {
 
   const profile = webExProfiles.find((item) => item.id === exId);
   if (profile) {
-    profile.lastMessage = content;
+    profile.lastMessage = content || (message.imageUris?.length ? '[图片]' : '');
     profile.lastMessageAt = message.time;
   }
 

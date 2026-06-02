@@ -1,7 +1,9 @@
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -105,8 +107,9 @@ function HomeScreen({ navigate }: { navigate: (screen: ScreenState) => void }) {
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-        {profiles.map((profile) => (
-          <Pressable key={profile.id} onPress={() => navigate({ name: 'chat', id: profile.id })}>
+        {profiles.map((profile, index) => (
+          <StaggeredItem key={profile.id} index={index}>
+          <PressableScale onPress={() => navigate({ name: 'chat', id: profile.id })}>
             <View style={styles.card}>
               <View style={styles.avatar}>
                 <Text style={styles.avatarText}>{profile.avatar}</Text>
@@ -122,7 +125,8 @@ function HomeScreen({ navigate }: { navigate: (screen: ScreenState) => void }) {
                 <Text style={styles.metaText}>关系温度 {profile.temperature} · {profile.mood}</Text>
               </View>
             </View>
-          </Pressable>
+          </PressableScale>
+          </StaggeredItem>
         ))}
       </ScrollView>
     </ScreenFrame>
@@ -208,8 +212,9 @@ function ChatScreen({
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <ScrollView contentContainerStyle={styles.messages} showsVerticalScrollIndicator={false}>
-          {messages.map((message) => (
-            <View
+          {messages.map((message, index) => (
+            <StaggeredItem key={message.id} index={index} compact>
+            <Animated.View
               key={message.id}
               style={[
                 styles.bubble,
@@ -218,7 +223,8 @@ function ChatScreen({
             >
               <Text style={styles.bubbleText}>{message.content}</Text>
               <Text style={styles.bubbleTime}>{message.time}</Text>
-            </View>
+            </Animated.View>
+            </StaggeredItem>
           ))}
           {sending ? <LoadingLine text="她正在想怎么回..." /> : null}
         </ScrollView>
@@ -231,9 +237,9 @@ function ChatScreen({
             style={styles.input}
             value={draft}
           />
-          <Pressable disabled={!draft.trim() || sending} onPress={send} style={styles.sendButton}>
+          <PressableScale disabled={!draft.trim() || sending} onPress={send} style={styles.sendButton}>
             <Text style={styles.sendButtonText}>发</Text>
-          </Pressable>
+          </PressableScale>
         </View>
       </ScreenFrame>
     </KeyboardAvoidingView>
@@ -313,12 +319,12 @@ function SettingsScreen({ navigate }: { navigate: (screen: ScreenState) => void 
 
       <Text style={styles.statusText}>{status}</Text>
       <View style={styles.actionRow}>
-        <Pressable disabled={saving} onPress={save} style={styles.primaryAction}>
+        <PressableScale disabled={saving} onPress={save} style={styles.primaryAction}>
           <Text style={styles.primaryActionText}>{saving ? '处理中...' : '保存'}</Text>
-        </Pressable>
-        <Pressable disabled={!canTest || saving} onPress={test} style={styles.secondaryAction}>
+        </PressableScale>
+        <PressableScale disabled={!canTest || saving} onPress={test} style={styles.secondaryAction}>
           <Text style={styles.primaryActionText}>测试连接</Text>
-        </Pressable>
+        </PressableScale>
       </View>
     </ScreenFrame>
   );
@@ -372,9 +378,9 @@ function NewProfileScreen({ navigate }: { navigate: (screen: ScreenState) => voi
         value={description}
       />
       <Text style={styles.statusText}>{status}</Text>
-      <Pressable disabled={saving} onPress={create} style={styles.primaryAction}>
+      <PressableScale disabled={saving} onPress={create} style={styles.primaryAction}>
         <Text style={styles.primaryActionText}>{saving ? '创建中...' : '创建'}</Text>
-      </Pressable>
+      </PressableScale>
     </ScreenFrame>
   );
 }
@@ -386,7 +392,40 @@ function ScreenFrame({
   children: React.ReactNode;
   compact?: boolean;
 }) {
-  return <View style={[styles.screen, compact && styles.screenCompact]}>{children}</View>;
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(14)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, {
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        toValue: 1,
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        toValue: 0,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [opacity, translateY]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.screen,
+        compact && styles.screenCompact,
+        {
+          opacity,
+          transform: [{ translateY }],
+        },
+      ]}
+    >
+      {children}
+    </Animated.View>
+  );
 }
 
 function Field({
@@ -408,11 +447,34 @@ function Field({
 }
 
 function LoadingLine({ text }: { text: string }) {
+  const opacity = useRef(new Animated.Value(0.35)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          duration: 720,
+          easing: Easing.inOut(Easing.quad),
+          toValue: 1,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          duration: 720,
+          easing: Easing.inOut(Easing.quad),
+          toValue: 0.35,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+
   return (
-    <View style={styles.loadingLine}>
+    <Animated.View style={[styles.loadingLine, { opacity }]}>
       <ActivityIndicator color={palette.accent} size="small" />
       <Text style={styles.stateText}>{text}</Text>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -426,9 +488,89 @@ function RoundButton({
   primary?: boolean;
 }) {
   return (
-    <Pressable onPress={onPress} style={[styles.roundButton, primary && styles.roundButtonPrimary]}>
+    <PressableScale onPress={onPress} style={[styles.roundButton, primary && styles.roundButtonPrimary]}>
       <Text style={styles.roundButtonText}>{label}</Text>
-    </Pressable>
+    </PressableScale>
+  );
+}
+
+function PressableScale({
+  children,
+  disabled,
+  onPress,
+  style,
+}: {
+  children: React.ReactNode;
+  disabled?: boolean;
+  onPress: () => void;
+  style?: React.ComponentProps<typeof Pressable>['style'];
+}) {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  function animate(toValue: number, duration: number) {
+    Animated.timing(scale, {
+      duration,
+      easing: Easing.out(Easing.cubic),
+      toValue,
+      useNativeDriver: true,
+    }).start();
+  }
+
+  return (
+    <Animated.View style={[disabled && styles.disabled, { transform: [{ scale }] }]}>
+      <Pressable
+        disabled={disabled}
+        onPress={onPress}
+        onPressIn={() => animate(0.94, 105)}
+        onPressOut={() => animate(1, 150)}
+        style={style}
+      >
+        {children}
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+function StaggeredItem({
+  children,
+  compact,
+  index,
+}: {
+  children: React.ReactNode;
+  compact?: boolean;
+  index: number;
+}) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(compact ? 8 : 18)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, {
+        delay: Math.min(index * 45, 220),
+        duration: compact ? 180 : 260,
+        easing: Easing.out(Easing.cubic),
+        toValue: 1,
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateY, {
+        delay: Math.min(index * 45, 220),
+        duration: compact ? 210 : 300,
+        easing: Easing.out(Easing.cubic),
+        toValue: 0,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [compact, index, opacity, translateY]);
+
+  return (
+    <Animated.View
+      style={{
+        opacity,
+        transform: [{ translateY }],
+      }}
+    >
+      {children}
+    </Animated.View>
   );
 }
 
@@ -589,6 +731,9 @@ const styles = StyleSheet.create({
     height: 36,
     justifyContent: 'center',
     width: 42,
+  },
+  disabled: {
+    opacity: 0.48,
   },
   sendButtonText: {
     color: palette.text,

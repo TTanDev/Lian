@@ -22,21 +22,27 @@ import { buildChatPrompt } from '@/features/chat/prompt';
 import {
   addAssistantMessage,
   addUserMessage,
+  addLearningSource,
   createExProfile,
   deleteExProfile,
   getExProfile,
   getExProfiles,
+  getLearningSources,
   getMessages,
   getRecentMessagesForPrompt,
+  updateSkillProfile,
 } from '@/features/exes/repository';
-import { ChatMessage, ExProfile, ExProfileDetail } from '@/features/exes/types';
-import { generateChatReply, testOpenAIConnection } from '@/lib/openai/client';
+import { ChatMessage, ExProfile, ExProfileDetail, LearningSource, LearningSourceType } from '@/features/exes/types';
+import { pickDocumentSource, pickImageSource } from '@/features/learning/importers';
+import { buildSkillProfilePrompt, parseSkillProfileDraft } from '@/features/learning/skillProfile';
+import { generateChatReply, generateStructuredText, testOpenAIConnection } from '@/lib/openai/client';
 import { ApiSettings, getApiSettings, saveApiSettings } from '@/lib/settings/apiSettings';
 import { palette } from '@/theme/palette';
 
 type ScreenState =
   | { name: 'home' }
   | { name: 'chat'; id: string }
+  | { name: 'learning'; id: string }
   | { name: 'settings' }
   | { name: 'new' };
 
@@ -54,6 +60,7 @@ export default function NoRouterApp() {
       <StatusBar style="light" />
       {screen.name === 'home' ? <HomeScreen navigate={setScreen} /> : null}
       {screen.name === 'chat' ? <ChatScreen id={screen.id} navigate={setScreen} /> : null}
+      {screen.name === 'learning' ? <LearningScreen id={screen.id} navigate={setScreen} /> : null}
       {screen.name === 'settings' ? <SettingsScreen navigate={setScreen} /> : null}
       {screen.name === 'new' ? <NewProfileScreen navigate={setScreen} /> : null}
     </SafeAreaView>
@@ -167,7 +174,9 @@ function ChatScreen({
   const [profile, setProfile] = useState<ExProfileDetail | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchVisible, setSearchVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -275,14 +284,39 @@ function ChatScreen({
               {profile ? `关系温度 ${profile.temperature} · ${profile.mood}` : '正在读取...'}
             </Text>
           </View>
+          <RoundButton label="⋯" onPress={() => setMenuOpen((current) => !current)} />
         </View>
-        <TextInput
-          onChangeText={setSearchQuery}
-          placeholder="搜索聊天记录..."
-          placeholderTextColor={palette.muted}
-          style={styles.searchInput}
-          value={searchQuery}
-        />
+        {menuOpen ? (
+          <View style={styles.moreMenu}>
+            <PressableScale
+              onPress={() => {
+                setSearchVisible((current) => !current);
+                setSearchQuery('');
+              }}
+              style={styles.menuAction}
+            >
+              <Text style={styles.menuActionText}>{searchVisible ? '关闭搜索' : '搜索聊天记录'}</Text>
+            </PressableScale>
+            <PressableScale
+              onPress={() => {
+                Keyboard.dismiss();
+                navigate({ name: 'learning', id });
+              }}
+              style={styles.menuAction}
+            >
+              <Text style={styles.menuActionText}>学习资料</Text>
+            </PressableScale>
+          </View>
+        ) : null}
+        {searchVisible ? (
+          <TextInput
+            onChangeText={setSearchQuery}
+            placeholder="搜索聊天记录..."
+            placeholderTextColor={palette.muted}
+            style={styles.searchInput}
+            value={searchQuery}
+          />
+        ) : null}
 
         {loading ? <LoadingLine text="正在读取聊天记录..." /> : null}
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -334,6 +368,198 @@ function ChatScreen({
         </View>
       </ScreenFrame>
     </KeyboardAvoidingView>
+  );
+}
+
+function LearningScreen({
+  id,
+  navigate,
+}: {
+  id: string;
+  navigate: (screen: ScreenState) => void;
+}) {
+  const [profile, setProfile] = useState<ExProfileDetail | null>(null);
+  const [sources, setSources] = useState<LearningSource[]>([]);
+  const [manualText, setManualText] = useState('');
+  const [status, setStatus] = useState('资料会先保存在本机，学习时再发送必要片段给模型。');
+  const [loading, setLoading] = useState(true);
+  const [learning, setLearning] = useState(false);
+
+  async function load() {
+    try {
+      setLoading(true);
+      const [nextProfile, nextSources] = await Promise.all([
+        getExProfile(id),
+        getLearningSources(id),
+      ]);
+      setProfile(nextProfile);
+      setSources(nextSources);
+    } catch (caught) {
+      setStatus(caught instanceof Error ? caught.message : '读取学习资料失败');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, [id]);
+
+  async function importDocument(type: LearningSourceType = 'document') {
+    try {
+      setStatus('正在选择文件...');
+      const picked = await pickDocumentSource(type);
+      if (!picked) {
+        setStatus('已取消导入。');
+        return;
+      }
+
+      await addLearningSource({
+        exId: id,
+        localUri: picked.localUri,
+        summary: '等待学习分析。',
+        title: picked.title,
+        type: picked.type,
+      });
+      await load();
+      setStatus('文件已加入学习资料。');
+    } catch (caught) {
+      setStatus(caught instanceof Error ? caught.message : '导入失败');
+    }
+  }
+
+  async function importImage(type: LearningSourceType) {
+    try {
+      setStatus('正在选择图片...');
+      const picked = await pickImageSource(type);
+      if (!picked) {
+        setStatus('已取消导入。');
+        return;
+      }
+
+      await addLearningSource({
+        exId: id,
+        localUri: picked.localUri,
+        summary: '等待多模态模型分析。',
+        title: picked.title,
+        type: picked.type,
+      });
+      await load();
+      setStatus('图片已加入学习资料。');
+    } catch (caught) {
+      setStatus(caught instanceof Error ? caught.message : '导入失败');
+    }
+  }
+
+  async function addManualText() {
+    const text = manualText.trim();
+    if (!text) {
+      setStatus('先写一点补充资料。');
+      return;
+    }
+
+    await addLearningSource({
+      exId: id,
+      rawText: text,
+      summary: text.slice(0, 80),
+      title: `手动补充 ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`,
+      type: 'text',
+    });
+    setManualText('');
+    await load();
+    setStatus('手动资料已加入。');
+  }
+
+  async function startLearning() {
+    if (!profile || learning) {
+      return;
+    }
+
+    try {
+      setLearning(true);
+      setStatus('正在生成她的 Skill 档案...');
+      const settings = await getApiSettings();
+      const prompt = buildSkillProfilePrompt(profile, sources);
+      const response = await generateStructuredText(settings, prompt);
+      const draft = parseSkillProfileDraft(response);
+      await updateSkillProfile(id, draft);
+      await load();
+      setStatus('Skill 档案已更新，会影响后续聊天语气。');
+    } catch (caught) {
+      setStatus(caught instanceof Error ? caught.message : '学习失败');
+    } finally {
+      setLearning(false);
+    }
+  }
+
+  return (
+    <ScreenFrame onSwipeBack={() => navigate({ name: 'chat', id })}>
+      <View style={styles.chatHeader}>
+        <RoundButton label="‹" onPress={() => navigate({ name: 'chat', id })} />
+        <View style={styles.chatTitleBox}>
+          <Text style={styles.titleSmall}>学习资料</Text>
+          <Text style={styles.metaText}>{profile?.name ?? '她'} 的 Skill 档案</Text>
+        </View>
+      </View>
+
+      {loading ? <LoadingLine text="正在读取资料库..." /> : null}
+      <ScrollView contentContainerStyle={styles.learningContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.panel}>
+          <Text style={styles.panelTitle}>导入资料</Text>
+          <Text style={styles.panelBody}>
+            支持聊天记录、照片/截图、表情包和你的主观描述。原始资料保存在本机。
+          </Text>
+          <View style={styles.actionRow}>
+            <PressableScale onPress={() => importDocument('document')} style={styles.secondaryAction}>
+              <Text style={styles.primaryActionText}>聊天/文件</Text>
+            </PressableScale>
+            <PressableScale onPress={() => importImage('screenshot')} style={styles.secondaryAction}>
+              <Text style={styles.primaryActionText}>照片/截图</Text>
+            </PressableScale>
+            <PressableScale onPress={() => importImage('sticker')} style={styles.secondaryAction}>
+              <Text style={styles.primaryActionText}>表情包</Text>
+            </PressableScale>
+          </View>
+        </View>
+
+        <View style={styles.panel}>
+          <Text style={styles.panelTitle}>手动补充</Text>
+          <TextInput
+            multiline
+            onChangeText={setManualText}
+            placeholder="补充她的性格、口头禅、雷点、你们之间发生过的事..."
+            placeholderTextColor={palette.muted}
+            style={[styles.fieldInput, styles.fieldInputMultiline]}
+            value={manualText}
+          />
+          <PressableScale onPress={addManualText} style={styles.primaryAction}>
+            <Text style={styles.primaryActionText}>加入资料</Text>
+          </PressableScale>
+        </View>
+
+        <View style={styles.panel}>
+          <Text style={styles.panelTitle}>开始学习</Text>
+          <Text style={styles.panelBody}>{status}</Text>
+          <PressableScale disabled={learning} onPress={startLearning} style={styles.primaryAction}>
+            <Text style={styles.primaryActionText}>{learning ? '学习中...' : '生成 Skill 档案'}</Text>
+          </PressableScale>
+        </View>
+
+        <Text style={styles.sectionLabel}>已导入资料</Text>
+        {sources.length === 0 ? (
+          <Text style={styles.emptyText}>还没有资料。先导入聊天记录、照片、表情包或手动描述。</Text>
+        ) : null}
+        {sources.map((source, index) => (
+          <StaggeredItem key={source.id} index={index} compact>
+            <View style={styles.importedCard}>
+              <Text style={styles.importedTitle}>{source.title}</Text>
+              <Text style={styles.importedMeta}>{source.type} · {source.status}</Text>
+              <Text style={styles.importedBody}>{source.summary || source.rawText || '等待学习分析。'}</Text>
+            </View>
+          </StaggeredItem>
+        ))}
+      </ScrollView>
+    </ScreenFrame>
   );
 }
 
@@ -814,6 +1040,32 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     paddingHorizontal: 13,
   },
+  moreMenu: {
+    backgroundColor: palette.glassStrong,
+    borderColor: palette.stroke,
+    borderRadius: 18,
+    borderWidth: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 12,
+    padding: 10,
+  },
+  menuAction: {
+    alignItems: 'center',
+    backgroundColor: palette.input,
+    borderColor: palette.stroke,
+    borderRadius: 14,
+    borderWidth: 1,
+    minHeight: 38,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  menuActionText: {
+    color: palette.text,
+    fontSize: 13,
+    fontWeight: '800',
+  },
   messageList: {
     flex: 1,
   },
@@ -909,6 +1161,62 @@ const styles = StyleSheet.create({
     minHeight: 112,
     paddingTop: 12,
     textAlignVertical: 'top',
+  },
+  learningContent: {
+    gap: 14,
+    paddingBottom: 28,
+  },
+  panel: {
+    backgroundColor: palette.glassStrong,
+    borderColor: palette.stroke,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 12,
+    padding: 16,
+  },
+  panelTitle: {
+    color: palette.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  panelBody: {
+    color: palette.subtle,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  sectionLabel: {
+    color: palette.text,
+    fontSize: 16,
+    fontWeight: '800',
+    marginTop: 4,
+  },
+  emptyText: {
+    color: palette.muted,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  importedCard: {
+    backgroundColor: palette.glassStrong,
+    borderColor: palette.stroke,
+    borderRadius: 18,
+    borderWidth: 1,
+    gap: 5,
+    padding: 14,
+  },
+  importedTitle: {
+    color: palette.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  importedMeta: {
+    color: palette.accentSoft,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  importedBody: {
+    color: palette.subtle,
+    fontSize: 13,
+    lineHeight: 19,
   },
   loadingLine: {
     alignItems: 'center',

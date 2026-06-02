@@ -110,6 +110,17 @@ export function createWebExProfile(input: {
   return profile;
 }
 
+export function deleteWebExProfile(id: string) {
+  const index = webExProfiles.findIndex((profile) => profile.id === id);
+  if (index >= 0) {
+    webExProfiles.splice(index, 1);
+  }
+
+  delete webMessages[id];
+  delete webLearningSources[id];
+  delete webProactiveMessages[id];
+}
+
 export function addWebLearningSource(input: {
   exId: string;
   type: LearningSource['type'];

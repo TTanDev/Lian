@@ -17,6 +17,7 @@ import {
   addWebUserMessage,
   createWebProactiveMessage,
   createWebExProfile,
+  deleteWebExProfile,
   deliverWebProactiveMessage,
   getWebExProfile,
   getWebExProfiles,
@@ -214,6 +215,15 @@ export async function createExProfile(input: CreateExProfileInput): Promise<ExPr
   }
 
   return profile;
+}
+
+export async function deleteExProfile(id: string) {
+  if (Platform.OS === 'web') {
+    return deleteWebExProfile(id);
+  }
+
+  const database = await getDatabase();
+  await database.runAsync('DELETE FROM ex_profiles WHERE id = ?', id);
 }
 
 export async function addUserMessage(exId: string, content: string): Promise<ChatMessage> {

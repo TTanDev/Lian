@@ -3,8 +3,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  AppState,
   Easing,
+  Keyboard,
   KeyboardAvoidingView,
+  PanResponder,
   Platform,
   Pressable,
   SafeAreaView,
@@ -20,6 +23,7 @@ import {
   addAssistantMessage,
   addUserMessage,
   createExProfile,
+  deleteExProfile,
   getExProfile,
   getExProfiles,
   getMessages,
@@ -58,37 +62,40 @@ export default function NoRouterApp() {
 
 function HomeScreen({ navigate }: { navigate: (screen: ScreenState) => void }) {
   const [profiles, setProfiles] = useState<ExProfile[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<ExProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  async function load() {
+    try {
+      setLoading(true);
+      setError(null);
+      const rows = await getExProfiles();
+      setProfiles(rows);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '读取她的列表失败');
+    } finally {
+      setLoading(false);
+    }
+  }
 
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-        const rows = await getExProfiles();
-        if (!cancelled) {
-          setProfiles(rows);
-        }
-      } catch (caught) {
-        if (!cancelled) {
-          setError(caught instanceof Error ? caught.message : '读取她的列表失败');
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function confirmDelete() {
+    if (!deleteTarget) {
+      return;
     }
 
-    load();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    try {
+      await deleteExProfile(deleteTarget.id);
+      setDeleteTarget(null);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '删除失败');
+    }
+  }
 
   return (
     <ScreenFrame>
@@ -109,7 +116,10 @@ function HomeScreen({ navigate }: { navigate: (screen: ScreenState) => void }) {
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
         {profiles.map((profile, index) => (
           <StaggeredItem key={profile.id} index={index}>
-          <PressableScale onPress={() => navigate({ name: 'chat', id: profile.id })}>
+          <PressableScale
+            onLongPress={() => setDeleteTarget(profile)}
+            onPress={() => navigate({ name: 'chat', id: profile.id })}
+          >
             <View style={styles.card}>
               <View style={styles.avatar}>
                 <Text style={styles.avatarText}>{profile.avatar}</Text>
@@ -129,6 +139,20 @@ function HomeScreen({ navigate }: { navigate: (screen: ScreenState) => void }) {
           </StaggeredItem>
         ))}
       </ScrollView>
+
+      {deleteTarget ? (
+        <View style={styles.deleteBar}>
+          <Text style={styles.deleteText}>删除「{deleteTarget.name}」和所有聊天记录？</Text>
+          <View style={styles.deleteActions}>
+            <PressableScale onPress={() => setDeleteTarget(null)} style={styles.cancelDeleteButton}>
+              <Text style={styles.deleteButtonText}>取消</Text>
+            </PressableScale>
+            <PressableScale onPress={confirmDelete} style={styles.confirmDeleteButton}>
+              <Text style={styles.deleteButtonText}>删除</Text>
+            </PressableScale>
+          </View>
+        </View>
+      ) : null}
     </ScreenFrame>
   );
 }
@@ -143,26 +167,65 @@ function ChatScreen({
   const [profile, setProfile] = useState<ExProfileDetail | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const scrollRef = useRef<ScrollView | null>(null);
 
-  async function load() {
+  const filteredMessages = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) {
+      return messages;
+    }
+
+    return messages.filter((message) =>
+      displayMessageContent(message).toLowerCase().includes(query)
+    );
+  }, [messages, searchQuery]);
+
+  function scrollToBottom(animated = true) {
+    requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated }));
+  }
+
+  async function load(options?: { showSpinner?: boolean }) {
     try {
-      setLoading(true);
+      if (options?.showSpinner !== false) {
+        setLoading(true);
+      }
       setError(null);
       const [nextProfile, nextMessages] = await Promise.all([getExProfile(id), getMessages(id)]);
       setProfile(nextProfile);
       setMessages(nextMessages);
+      scrollToBottom(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '读取聊天失败');
     } finally {
-      setLoading(false);
+      if (options?.showSpinner !== false) {
+        setLoading(false);
+      }
     }
   }
 
   useEffect(() => {
     load();
+  }, [id]);
+
+  useEffect(() => {
+    scrollToBottom(false);
+  }, [messages.length, searchQuery]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        load({ showSpinner: false });
+        scrollToBottom(false);
+      } else {
+        Keyboard.dismiss();
+      }
+    });
+
+    return () => subscription.remove();
   }, [id]);
 
   async function send() {
@@ -175,18 +238,24 @@ function ChatScreen({
       setSending(true);
       setError(null);
       setDraft('');
-      await addUserMessage(id, content);
+      const userMessage = await addUserMessage(id, content);
+      setMessages((current) => [...current, userMessage]);
+      scrollToBottom();
       const [settings, recentMessages] = await Promise.all([
         getApiSettings(),
         getRecentMessagesForPrompt(id),
       ]);
       const prompt = buildChatPrompt(profile, recentMessages);
       const reply = await generateChatReply(settings, prompt);
-      await addAssistantMessage(id, cleanupChatReply(reply) || '我不知道该怎么回你。');
-      await load();
+      const assistantMessage = await addAssistantMessage(
+        id,
+        cleanupChatReply(reply) || '我不知道该怎么回你。'
+      );
+      setMessages((current) => [...current, assistantMessage]);
+      scrollToBottom();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : '发送失败');
-      await load();
+      await load({ showSpinner: false });
     } finally {
       setSending(false);
     }
@@ -197,7 +266,7 @@ function ChatScreen({
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={styles.flex}
     >
-      <ScreenFrame compact>
+      <ScreenFrame compact onSwipeBack={() => navigate({ name: 'home' })}>
         <View style={styles.chatHeader}>
           <RoundButton label="‹" onPress={() => navigate({ name: 'home' })} />
           <View style={styles.chatTitleBox}>
@@ -207,12 +276,31 @@ function ChatScreen({
             </Text>
           </View>
         </View>
+        <TextInput
+          onChangeText={setSearchQuery}
+          placeholder="搜索聊天记录..."
+          placeholderTextColor={palette.muted}
+          style={styles.searchInput}
+          value={searchQuery}
+        />
 
         {loading ? <LoadingLine text="正在读取聊天记录..." /> : null}
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-        <ScrollView contentContainerStyle={styles.messages} showsVerticalScrollIndicator={false}>
-          {messages.map((message, index) => (
+        <ScrollView
+          contentContainerStyle={styles.messages}
+          keyboardShouldPersistTaps="handled"
+          onContentSizeChange={() => {
+            if (!searchQuery.trim()) {
+              scrollToBottom();
+            }
+          }}
+          onLayout={() => scrollToBottom(false)}
+          ref={scrollRef}
+          showsVerticalScrollIndicator={false}
+          style={styles.messageList}
+        >
+          {filteredMessages.map((message, index) => (
             <StaggeredItem key={message.id} index={index} compact>
             <Animated.View
               key={message.id}
@@ -221,11 +309,14 @@ function ChatScreen({
                 message.role === 'user' ? styles.userBubble : styles.assistantBubble,
               ]}
             >
-              <Text style={styles.bubbleText}>{message.content}</Text>
+              <Text style={styles.bubbleText}>{displayMessageContent(message)}</Text>
               <Text style={styles.bubbleTime}>{message.time}</Text>
             </Animated.View>
             </StaggeredItem>
           ))}
+          {searchQuery.trim() && filteredMessages.length === 0 ? (
+            <Text style={styles.emptySearchText}>没有找到相关聊天记录。</Text>
+          ) : null}
           {sending ? <LoadingLine text="她正在想怎么回..." /> : null}
         </ScrollView>
 
@@ -288,7 +379,7 @@ function SettingsScreen({ navigate }: { navigate: (screen: ScreenState) => void 
   }
 
   return (
-    <ScreenFrame>
+    <ScreenFrame onSwipeBack={() => navigate({ name: 'home' })}>
       <View style={styles.chatHeader}>
         <RoundButton label="‹" onPress={() => navigate({ name: 'home' })} />
         <View>
@@ -360,7 +451,7 @@ function NewProfileScreen({ navigate }: { navigate: (screen: ScreenState) => voi
   }
 
   return (
-    <ScreenFrame>
+    <ScreenFrame onSwipeBack={() => navigate({ name: 'home' })}>
       <View style={styles.chatHeader}>
         <RoundButton label="‹" onPress={() => navigate({ name: 'home' })} />
         <View>
@@ -388,12 +479,28 @@ function NewProfileScreen({ navigate }: { navigate: (screen: ScreenState) => voi
 function ScreenFrame({
   children,
   compact,
+  onSwipeBack,
 }: {
   children: React.ReactNode;
   compact?: boolean;
+  onSwipeBack?: () => void;
 }) {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(14)).current;
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) =>
+        Boolean(onSwipeBack) &&
+        gestureState.dx > 18 &&
+        Math.abs(gestureState.dy) < 24,
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx > 76 && Math.abs(gestureState.dy) < 42) {
+          Keyboard.dismiss();
+          onSwipeBack?.();
+        }
+      },
+    })
+  ).current;
 
   useEffect(() => {
     Animated.parallel([
@@ -414,6 +521,7 @@ function ScreenFrame({
 
   return (
     <Animated.View
+      {...(onSwipeBack ? panResponder.panHandlers : {})}
       style={[
         styles.screen,
         compact && styles.screenCompact,
@@ -504,14 +612,20 @@ function cleanupChatReply(reply: string) {
     .trim();
 }
 
+function displayMessageContent(message: ChatMessage) {
+  return message.role === 'assistant' ? cleanupChatReply(message.content) : message.content;
+}
+
 function PressableScale({
   children,
   disabled,
+  onLongPress,
   onPress,
   style,
 }: {
   children: React.ReactNode;
   disabled?: boolean;
+  onLongPress?: () => void;
   onPress: () => void;
   style?: React.ComponentProps<typeof Pressable>['style'];
 }) {
@@ -530,6 +644,7 @@ function PressableScale({
     <Animated.View style={[disabled && styles.disabled, { transform: [{ scale }] }]}>
       <Pressable
         disabled={disabled}
+        onLongPress={onLongPress}
         onPress={onPress}
         onPressIn={() => animate(0.94, 105)}
         onPressOut={() => animate(1, 150)}
@@ -688,10 +803,31 @@ const styles = StyleSheet.create({
   chatTitleBox: {
     flex: 1,
   },
+  searchInput: {
+    backgroundColor: palette.input,
+    borderColor: palette.stroke,
+    borderRadius: 16,
+    borderWidth: 1,
+    color: palette.text,
+    fontSize: 14,
+    minHeight: 40,
+    marginBottom: 12,
+    paddingHorizontal: 13,
+  },
+  messageList: {
+    flex: 1,
+  },
   messages: {
     flexGrow: 1,
     gap: 12,
+    justifyContent: 'flex-end',
     paddingBottom: 16,
+  },
+  emptySearchText: {
+    alignSelf: 'center',
+    color: palette.muted,
+    fontSize: 13,
+    paddingVertical: 24,
   },
   bubble: {
     borderRadius: 18,
@@ -843,6 +979,47 @@ const styles = StyleSheet.create({
   roundButtonText: {
     color: palette.text,
     fontSize: 19,
+    fontWeight: '800',
+  },
+  deleteBar: {
+    backgroundColor: palette.glassStrong,
+    borderColor: palette.stroke,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 12,
+    padding: 14,
+  },
+  deleteText: {
+    color: palette.text,
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 20,
+  },
+  deleteActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  cancelDeleteButton: {
+    alignItems: 'center',
+    backgroundColor: palette.input,
+    borderColor: palette.stroke,
+    borderRadius: 15,
+    borderWidth: 1,
+    minHeight: 40,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  confirmDeleteButton: {
+    alignItems: 'center',
+    backgroundColor: palette.accent,
+    borderRadius: 15,
+    minHeight: 40,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  deleteButtonText: {
+    color: palette.text,
+    fontSize: 14,
     fontWeight: '800',
   },
 });

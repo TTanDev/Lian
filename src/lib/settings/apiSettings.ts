@@ -9,12 +9,14 @@ export type ApiSettings = {
   baseUrl: string;
   apiKey: string;
   model: string;
+  supportsImages: boolean;
 };
 
 const defaultSettings: ApiSettings = {
   apiKey: '',
   baseUrl: '',
   model: 'mimo2.5',
+  supportsImages: false,
 };
 
 const webSettings: ApiSettings = { ...defaultSettings };
@@ -30,7 +32,7 @@ export async function getApiSettings(): Promise<ApiSettings> {
   const database = await getDatabase();
   const SecureStore = await import('expo-secure-store');
   const rows = await database.getAllAsync<{ key: string; value: string }>(
-    "SELECT key, value FROM app_settings WHERE key IN ('api.baseUrl', 'api.model')"
+    "SELECT key, value FROM app_settings WHERE key IN ('api.baseUrl', 'api.model', 'api.supportsImages')"
   );
   const apiKey = await SecureStore.getItemAsync(API_KEY_STORAGE_KEY);
   const settings = rows.reduce<Record<string, string>>((accumulator, row) => {
@@ -42,6 +44,7 @@ export async function getApiSettings(): Promise<ApiSettings> {
     apiKey: apiKey ?? '',
     baseUrl: settings['api.baseUrl'] ?? '',
     model: settings['api.model'] ?? defaultSettings.model,
+    supportsImages: settings['api.supportsImages'] === 'true',
   };
 }
 
@@ -73,6 +76,12 @@ export async function saveApiSettings(settings: ApiSettings) {
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
       ['api.model', normalized.model, now]
     );
+    await database.runAsync(
+      `INSERT INTO app_settings (key, value, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      ['api.supportsImages', normalized.supportsImages ? 'true' : 'false', now]
+    );
   });
 
   if (normalized.apiKey) {
@@ -87,5 +96,6 @@ function normalizeApiSettings(settings: ApiSettings): ApiSettings {
     apiKey: settings.apiKey.trim(),
     baseUrl: settings.baseUrl.trim().replace(/\/+$/, ''),
     model: settings.model.trim() || defaultSettings.model,
+    supportsImages: Boolean(settings.supportsImages),
   };
 }

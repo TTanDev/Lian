@@ -15,6 +15,7 @@ import {
   SafeAreaView,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   useColorScheme,
@@ -66,6 +67,7 @@ const emptySettings: ApiSettings = {
   apiKey: '',
   baseUrl: '',
   model: 'mimo2.5',
+  supportsImages: false,
 };
 
 export default function NoRouterApp() {
@@ -209,6 +211,7 @@ function ChatScreen({
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [supportsImages, setSupportsImages] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView | null>(null);
 
@@ -230,8 +233,6 @@ function ChatScreen({
   function scrollToBottomAfterLayout(animated = true) {
     scrollToBottom(animated);
     setTimeout(() => scrollToBottom(animated), 80);
-    setTimeout(() => scrollToBottom(animated), 220);
-    setTimeout(() => scrollToBottom(animated), 420);
   }
 
   async function load(options?: { showSpinner?: boolean }) {
@@ -255,6 +256,9 @@ function ChatScreen({
 
   useEffect(() => {
     load();
+    getApiSettings()
+      .then((settings) => setSupportsImages(settings.supportsImages))
+      .catch(() => setSupportsImages(false));
   }, [id]);
 
   useEffect(() => {
@@ -283,11 +287,13 @@ function ChatScreen({
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSubscription = Keyboard.addListener(showEvent, () => {
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      Keyboard.scheduleLayoutAnimation(event);
       setKeyboardVisible(true);
       scrollToBottomAfterLayout(true);
     });
-    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+    const hideSubscription = Keyboard.addListener(hideEvent, (event) => {
+      Keyboard.scheduleLayoutAnimation(event);
       setKeyboardVisible(false);
     });
 
@@ -312,17 +318,24 @@ function ChatScreen({
     try {
       setSending(true);
       setError(null);
-      setDraft('');
       const imageUris = selectedImages;
+      const [settings, recentMessages] = await Promise.all([
+        getApiSettings(),
+        getRecentMessagesForPrompt(id),
+      ]);
+
+      setSupportsImages(settings.supportsImages);
+      if (imageUris.length && !settings.supportsImages) {
+        setError('当前模型没有开启图片功能，请在设置里开启后再发送图片。');
+        return;
+      }
+
+      setDraft('');
       setSelectedImages([]);
       setToolPanel(null);
       const userMessage = await addUserMessage(id, content, { imageUris });
       setMessages((current) => [...current, userMessage]);
       scrollToBottom();
-      const [settings, recentMessages] = await Promise.all([
-        getApiSettings(),
-        getRecentMessagesForPrompt(id),
-      ]);
       const prompt = buildChatPrompt(profile, recentMessages);
       const reply = await generateChatReply(settings, prompt);
       const assistantMessage = await addAssistantMessage(
@@ -340,6 +353,12 @@ function ChatScreen({
   }
 
   async function pickChatImages() {
+    if (!supportsImages) {
+      setError('图片功能已关闭。可以在设置里开启“当前模型支持图片”。');
+      setToolPanel(null);
+      return;
+    }
+
     try {
       Keyboard.dismiss();
       const picked = await pickImageSources('image', 9 - selectedImages.length);
@@ -356,6 +375,12 @@ function ChatScreen({
   }
 
   async function takeChatPhoto() {
+    if (!supportsImages) {
+      setError('图片功能已关闭。可以在设置里开启“当前模型支持图片”。');
+      setToolPanel(null);
+      return;
+    }
+
     try {
       Keyboard.dismiss();
       const picked = await pickCameraSource('image');
@@ -477,8 +502,8 @@ function ChatScreen({
         ) : null}
         {toolPanel === 'plus' ? (
           <SlidingToolPanel>
-            <ToolTile label="照片" icon="▧" onPress={pickChatImages} />
-            <ToolTile label="拍摄" icon="○" onPress={takeChatPhoto} />
+            {supportsImages ? <ToolTile label="照片" icon="▧" onPress={pickChatImages} /> : null}
+            {supportsImages ? <ToolTile label="拍摄" icon="○" onPress={takeChatPhoto} /> : null}
             <ToolTile label="表情" icon="☺" onPress={() => setToolPanel('emoji')} />
             <ToolTile label="资料" icon="※" onPress={() => navigate({ name: 'learning', id, from: 'chat' })} />
           </SlidingToolPanel>
@@ -857,7 +882,7 @@ function LearningScreen({
 }
 
 function SettingsScreen({ navigate }: { navigate: (screen: ScreenState) => void }) {
-  const { mode, setMode, styles } = useAppTheme();
+  const { colors, mode, setMode, styles } = useAppTheme();
   const [settings, setSettings] = useState<ApiSettings>(emptySettings);
   const [status, setStatus] = useState('API 地址、Key 和模型只保存在本机。');
   const [saving, setSaving] = useState(false);
@@ -927,6 +952,25 @@ function SettingsScreen({ navigate }: { navigate: (screen: ScreenState) => void 
         placeholder="mimo2.5"
         value={settings.model}
       />
+
+      <View style={styles.panel}>
+        <View style={styles.switchRow}>
+          <View style={styles.switchCopy}>
+            <Text style={styles.panelTitle}>图片功能</Text>
+            <Text style={styles.panelBody}>当前模型支持图片输入时再开启。关闭后聊天页不会发送照片或拍摄内容。</Text>
+          </View>
+          <Switch
+            ios_backgroundColor={colors.muted}
+            onValueChange={(supportsImages) => setSettings((current) => ({ ...current, supportsImages }))}
+            thumbColor={settings.supportsImages ? colors.text : colors.backgroundAlt}
+            trackColor={{
+              false: colors.muted,
+              true: colors.accent,
+            }}
+            value={settings.supportsImages}
+          />
+        </View>
+      </View>
 
       <View style={styles.panel}>
         <Text style={styles.panelTitle}>外观</Text>
@@ -1168,12 +1212,28 @@ function RoundButton({
 }
 
 function cleanupChatReply(reply: string) {
-  return reply
+  let cleaned = reply
     .trim()
+    .replace(/\r\n/g, '\n')
     .replace(/^["“”]+|["“”]+$/g, '')
+    .replace(/^```(?:json|text)?\s*/i, '')
+    .replace(/```$/i, '')
+    .trim();
+
+  const messageBody = cleaned.match(/(?:^|\n)\s*(?:消息正文|回复文字|回复内容)\s*[:：]\s*([\s\S]*)$/u);
+  if (messageBody?.[1]) {
+    cleaned = messageBody[1].trim();
+  }
+
+  return cleaned
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => !/^(?:发送时间|延迟说明|图片数量|角色|role)\s*[:：]/iu.test(line))
+    .join('\n')
     .replace(/^(?:她|助手|assistant|AI)\s*[:：]\s*/i, '')
     .replace(/^(?:\[\s*)?(?:今天|昨天|前天)?\s*\d{1,2}[:：]\d{2}(?:\s*\])?\s*[，,。:：、-]?\s*/u, '')
     .replace(/^\[\s*(?:\d{1,2}[:：]\d{2}\s*)+\]\s*/u, '')
+    .replace(/^(?:消息正文|回复文字|回复内容)\s*[:：]\s*/u, '')
     .trim();
 }
 
@@ -1620,7 +1680,7 @@ const createStyles = (palette: AppPalette) => StyleSheet.create({
     paddingBottom: 18,
   },
   messagesWithKeyboard: {
-    paddingBottom: 112,
+    paddingBottom: 24,
   },
   messagesWithToolPanel: {
     paddingBottom: 42,
@@ -1836,6 +1896,16 @@ const createStyles = (palette: AppPalette) => StyleSheet.create({
     color: palette.subtle,
     fontSize: 13,
     lineHeight: 20,
+  },
+  switchRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 14,
+    justifyContent: 'space-between',
+  },
+  switchCopy: {
+    flex: 1,
+    gap: 8,
   },
   sectionLabel: {
     color: palette.text,

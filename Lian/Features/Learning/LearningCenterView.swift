@@ -9,18 +9,28 @@ struct LearningCenterView: View {
     var body: some View {
         NavigationStack {
             List {
-                ForEach(sources) { source in
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(source.title).font(.headline)
-                        Text(source.summary.isEmpty ? source.rawText : source.summary)
-                            .lineLimit(2)
-                            .foregroundStyle(.secondary)
-                        Text(source.status == .learned ? "已学习" : "待学习")
-                            .font(.caption)
-                            .foregroundStyle(source.status == .learned ? Color.green : Color.orange)
+                ForEach(charactersWithSources) { character in
+                    Section {
+                        ForEach(sources.filter { $0.characterID == character.id }) { source in
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(source.title).font(.headline)
+                                Text(source.summary.isEmpty ? source.rawText : source.summary)
+                                    .lineLimit(2)
+                                    .foregroundStyle(.secondary)
+                                Text(source.status == .learned ? "已学习" : "待学习")
+                                    .font(.caption)
+                                    .foregroundStyle(source.status == .learned ? Color.green : Color.orange)
+                            }
+                            .swipeActions {
+                                Button("删除", systemImage: "trash", role: .destructive) {
+                                    delete(source)
+                                }
+                            }
+                        }
+                    } header: {
+                        Label(character.name, systemImage: "person.crop.circle")
                     }
                 }
-                .onDelete(perform: delete)
             }
             .overlay {
                 if sources.isEmpty {
@@ -48,6 +58,12 @@ struct LearningCenterView: View {
         }
     }
 
+    private var charactersWithSources: [CharacterProfile] {
+        characters.filter { character in
+            sources.contains { $0.characterID == character.id }
+        }
+    }
+
     private func load() {
         do {
             sources = try AppRepository.shared.learningSources()
@@ -57,11 +73,9 @@ struct LearningCenterView: View {
         }
     }
 
-    private func delete(at offsets: IndexSet) {
+    private func delete(_ source: LearningSource) {
         do {
-            for index in offsets {
-                try AppRepository.shared.deleteLearningSource(id: sources[index].id)
-            }
+            try AppRepository.shared.deleteLearningSource(id: source.id)
             load()
         } catch {
             errorMessage = error.localizedDescription

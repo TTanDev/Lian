@@ -1,7 +1,7 @@
 import Foundation
 
 enum DatabaseSchema {
-    static let version = 1
+    static let version = 2
 
     static let migrationV1 = """
     PRAGMA foreign_keys = ON;
@@ -116,5 +116,10 @@ enum DatabaseSchema {
       created_at INTEGER NOT NULL,
       FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE
     );
+    """
+
+    static let migrationV2 = """
+    ALTER TABLE characters ADD COLUMN model_id TEXT REFERENCES api_models(id) ON DELETE SET NULL;
+    CREATE INDEX IF NOT EXISTS idx_characters_model ON characters(model_id);
     """
 }

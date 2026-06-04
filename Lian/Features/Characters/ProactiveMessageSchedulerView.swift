@@ -13,6 +13,7 @@ struct ProactiveMessageSchedulerView: View {
             Section("安排一条主动消息") {
                 TextField("消息内容", text: $content, axis: .vertical)
                 DatePicker("发送时间", selection: $scheduledAt, in: Date()...)
+                    .environment(\.locale, Locale(identifier: "zh_CN"))
                 Button("安排通知", systemImage: "bell.badge") {
                     schedule()
                 }
@@ -34,6 +35,7 @@ struct ProactiveMessageSchedulerView: View {
             }
         }
         .navigationTitle("主动消息")
+        .toolbar(.hidden, for: .tabBar)
         .task { load() }
         .alert("操作失败", isPresented: .constant(errorMessage != nil)) {
             Button("好") { errorMessage = nil }

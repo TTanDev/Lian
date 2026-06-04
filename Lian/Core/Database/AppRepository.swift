@@ -17,21 +17,22 @@ final class AppRepository: @unchecked Sendable {
             INSERT INTO characters (
               id, name, avatar_path, chat_background_path, summary, mood,
               relationship_temperature, persona, shared_memories, speech_style,
-              triggers, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              triggers, model_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
               name = excluded.name, avatar_path = excluded.avatar_path,
               chat_background_path = excluded.chat_background_path, summary = excluded.summary,
               mood = excluded.mood, relationship_temperature = excluded.relationship_temperature,
               persona = excluded.persona, shared_memories = excluded.shared_memories,
               speech_style = excluded.speech_style, triggers = excluded.triggers,
-              updated_at = excluded.updated_at
+              model_id = excluded.model_id, updated_at = excluded.updated_at
             """,
             values: [
                 .text(character.id), .text(character.name), optionalText(character.avatarPath),
                 optionalText(character.chatBackgroundPath), .text(character.summary), .text(character.mood),
                 .integer(Int64(character.relationshipTemperature)), .text(character.persona),
                 .text(character.sharedMemories), .text(character.speechStyle), .text(character.triggers),
+                optionalText(character.modelID),
                 .integer(character.createdAt.milliseconds), .integer(character.updatedAt.milliseconds)
             ]
         )
@@ -92,6 +93,15 @@ final class AppRepository: @unchecked Sendable {
                 attachments: try attachments(messageID: messageID)
             )
         }
+    }
+
+    func latestMessageDates() throws -> [String: Date] {
+        let rows = try database.rows(
+            "SELECT character_id, MAX(created_at) AS latest_at FROM chat_messages GROUP BY character_id"
+        )
+        return Dictionary(uniqueKeysWithValues: rows.map {
+            (text($0, "character_id"), date($0, "latest_at"))
+        })
     }
 
     func addMessage(
@@ -278,6 +288,7 @@ final class AppRepository: @unchecked Sendable {
             sharedMemories: text(row, "shared_memories"),
             speechStyle: text(row, "speech_style"),
             triggers: text(row, "triggers"),
+            modelID: optional(row, "model_id"),
             createdAt: date(row, "created_at"),
             updatedAt: date(row, "updated_at")
         )

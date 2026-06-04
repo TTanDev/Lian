@@ -12,6 +12,7 @@ struct CharacterProfile: Identifiable, Hashable, Sendable {
     var sharedMemories: String
     var speechStyle: String
     var triggers: String
+    var modelID: String?
     let createdAt: Date
     var updatedAt: Date
 }

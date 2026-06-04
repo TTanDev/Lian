@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ChatHomeView: View {
     @State private var characters: [CharacterProfile] = []
+    @State private var latestMessageDates: [String: Date] = [:]
     @State private var errorMessage: String?
 
     var body: some View {
@@ -21,7 +22,7 @@ struct ChatHomeView: View {
                             }
                         VStack(alignment: .leading, spacing: 5) {
                             Text(character.name).font(.headline)
-                            Text("\(character.mood) · 关系温度 \(character.relationshipTemperature)")
+                            Text(lastChatText(character))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
@@ -48,9 +49,18 @@ struct ChatHomeView: View {
         }
     }
 
+    private func lastChatText(_ character: CharacterProfile) -> String {
+        guard let date = latestMessageDates[character.id] else { return "还没有开始聊天" }
+        return date.formatted(
+            Date.FormatStyle(date: .abbreviated, time: .shortened)
+                .locale(Locale(identifier: "zh_CN"))
+        )
+    }
+
     private func load() {
         do {
             characters = try AppRepository.shared.characters()
+            latestMessageDates = try AppRepository.shared.latestMessageDates()
         } catch {
             errorMessage = error.localizedDescription
         }

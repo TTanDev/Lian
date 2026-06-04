@@ -5,19 +5,27 @@ struct CharacterListView: View {
     @State private var showingEditor = false
     @State private var errorMessage: String?
 
+    private let columns = [GridItem(.adaptive(minimum: 156), spacing: 14)]
+
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(characters) { character in
-                    NavigationLink {
-                        CharacterEditorView(character: character) {
-                            load()
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 14) {
+                    ForEach(characters) { character in
+                        NavigationLink {
+                            CharacterEditorView(character: character) { load() }
+                        } label: {
+                            CharacterCard(character: character)
                         }
-                    } label: {
-                        CharacterRow(character: character)
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("删除角色", systemImage: "trash", role: .destructive) {
+                                delete(character)
+                            }
+                        }
                     }
                 }
-                .onDelete(perform: delete)
+                .padding()
             }
             .overlay {
                 if characters.isEmpty {
@@ -31,8 +39,8 @@ struct CharacterListView: View {
                 }
             }
             .sheet(isPresented: $showingEditor) {
-                CharacterEditorView(character: nil) {
-                    load()
+                NavigationStack {
+                    CharacterEditorView(character: nil) { load() }
                 }
             }
             .task { load() }
@@ -52,11 +60,9 @@ struct CharacterListView: View {
         }
     }
 
-    private func delete(at offsets: IndexSet) {
+    private func delete(_ character: CharacterProfile) {
         do {
-            for index in offsets {
-                try AppRepository.shared.deleteCharacter(id: characters[index].id)
-            }
+            try AppRepository.shared.deleteCharacter(id: character.id)
             load()
         } catch {
             errorMessage = error.localizedDescription
@@ -64,25 +70,42 @@ struct CharacterListView: View {
     }
 }
 
-private struct CharacterRow: View {
+private struct CharacterCard: View {
     let character: CharacterProfile
 
     var body: some View {
-        HStack(spacing: 14) {
-            Circle()
-                .fill(.pink.gradient)
-                .frame(width: 48, height: 48)
-                .overlay {
-                    Text(character.name.prefix(1))
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(character.name).font(.headline)
-                Text("\(character.mood) · 关系温度 \(character.relationshipTemperature)")
-                    .font(.subheadline)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                Circle()
+                    .fill(.pink.gradient)
+                    .frame(width: 58, height: 58)
+                    .overlay {
+                        Text(character.name.prefix(1))
+                            .font(.title2.bold())
+                            .foregroundStyle(.white)
+                    }
+                Spacer()
+                Image(systemName: "slider.horizontal.3")
                     .foregroundStyle(.secondary)
             }
+            Spacer(minLength: 2)
+            Text(character.name)
+                .font(.title3.bold())
+                .foregroundStyle(.primary)
+            Text(character.summary.isEmpty ? "还没有角色简介" : character.summary)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            HStack {
+                Label(character.mood, systemImage: "heart.text.square")
+                Spacer()
+                Text("\(character.relationshipTemperature)°")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, minHeight: 190, alignment: .leading)
+        .padding(16)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }

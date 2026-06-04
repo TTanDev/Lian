@@ -40,8 +40,17 @@ final class DatabaseClient: @unchecked Sendable {
         }
 
         try execute(DatabaseSchema.migrationV1)
+        let appliedVersions = try rows("SELECT version FROM schema_migrations").compactMap {
+            $0["version"]?.int64.map(Int.init)
+        }
+        if !appliedVersions.contains(2) {
+            try execute(DatabaseSchema.migrationV2)
+            try execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (2, \(Int(Date().timeIntervalSince1970 * 1000)));"
+            )
+        }
         try execute(
-            "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (\(DatabaseSchema.version), \(Int(Date().timeIntervalSince1970 * 1000)));"
+            "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, \(Int(Date().timeIntervalSince1970 * 1000)));"
         )
     }
 

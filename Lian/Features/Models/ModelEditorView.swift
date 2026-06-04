@@ -41,6 +41,7 @@ struct ModelEditorView: View {
             }
         }
         .navigationTitle(model == nil ? "添加模型" : "编辑模型")
+        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("取消") { dismiss() }
@@ -104,13 +105,25 @@ struct ModelEditorView: View {
                 let response = try await ChatAPIClient().reply(
                     model: draft(),
                     apiKey: apiKey,
-                    messages: [PromptMessage(role: "user", content: "只回复 OK")]
+                    messages: [
+                        PromptMessage(
+                            role: "user",
+                            content: supportsImages ? "请识别这张测试图片，并只回复“图片测试成功”" : "只回复 OK"
+                        )
+                    ],
+                    latestImageData: supportsImages ? Self.visionTestImage : nil
                 )
-                resultMessage = "连接成功：\(MessageSanitizer.clean(response))"
+                resultMessage = supportsImages
+                    ? "连接与图片发送成功：\(MessageSanitizer.clean(response))"
+                    : "连接成功：\(MessageSanitizer.clean(response))"
             } catch {
                 resultMessage = error.localizedDescription
             }
             testing = false
         }
     }
+
+    private static let visionTestImage = Data(base64Encoded:
+        "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAEf/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABAf/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPxB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPxB//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxB//9k="
+    )!
 }

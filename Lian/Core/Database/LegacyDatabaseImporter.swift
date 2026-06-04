@@ -66,6 +66,7 @@ actor LegacyDatabaseImporter {
                     sharedMemories: row.text("shared_memories"),
                     speechStyle: row.text("speech_style"),
                     triggers: row.text("triggers"),
+                    modelID: nil,
                     createdAt: row.date("created_at") ?? now,
                     updatedAt: row.date("updated_at") ?? now
                 )

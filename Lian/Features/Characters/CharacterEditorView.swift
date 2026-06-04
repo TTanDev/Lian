@@ -22,6 +22,8 @@ struct CharacterEditorView: View {
     @State private var avatarItem: PhotosPickerItem?
     @State private var models: [APIModel] = []
     @State private var original = Draft.empty
+    @State private var persistedID: String?
+    @State private var persistedCreatedAt: Date?
     @State private var showingDiscardConfirmation = false
     @State private var errorMessage: String?
 
@@ -162,6 +164,8 @@ struct CharacterEditorView: View {
             )
         } ?? .empty
         original = value
+        persistedID = character?.id
+        persistedCreatedAt = character?.createdAt
         apply(value)
     }
 
@@ -181,10 +185,12 @@ struct CharacterEditorView: View {
 
     private func save() {
         let now = Date()
+        let id = persistedID ?? UUID().uuidString
+        let createdAt = persistedCreatedAt ?? now
         do {
             try AppRepository.shared.saveCharacter(
                 CharacterProfile(
-                    id: character?.id ?? UUID().uuidString,
+                    id: id,
                     name: name.trimmingCharacters(in: .whitespacesAndNewlines),
                     avatarPath: avatarPath,
                     chatBackgroundPath: character?.chatBackgroundPath,
@@ -196,12 +202,14 @@ struct CharacterEditorView: View {
                     speechStyle: speechStyle,
                     triggers: triggers,
                     modelID: modelID.isEmpty ? nil : modelID,
-                    createdAt: character?.createdAt ?? now,
+                    createdAt: createdAt,
                     updatedAt: now
                 )
             )
+            persistedID = id
+            persistedCreatedAt = createdAt
             onSave()
-            dismiss()
+            original = current
         } catch {
             errorMessage = error.localizedDescription
         }

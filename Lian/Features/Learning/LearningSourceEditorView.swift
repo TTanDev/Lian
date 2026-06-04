@@ -61,7 +61,8 @@ struct LearningSourceEditorView: View {
                 )
             )
             onSave()
-            dismiss()
+            title = ""
+            bodyText = ""
         } catch {
             errorMessage = error.localizedDescription
         }

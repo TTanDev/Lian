@@ -15,6 +15,8 @@ struct ModelEditorView: View {
     @State private var testing = false
     @State private var resultMessage: String?
     @State private var original = ModelDraft.empty
+    @State private var persistedID: String?
+    @State private var persistedCreatedAt: Date?
     @State private var showingDiscardConfirmation = false
 
     var body: some View {
@@ -102,6 +104,8 @@ struct ModelEditorView: View {
             )
         } ?? .empty
         original = value
+        persistedID = model?.id
+        persistedCreatedAt = model?.createdAt
         apply(value)
     }
 
@@ -117,13 +121,13 @@ struct ModelEditorView: View {
     private func draft() -> APIModel {
         let now = Date()
         return APIModel(
-            id: model?.id ?? UUID().uuidString,
+            id: persistedID ?? UUID().uuidString,
             displayName: displayName,
             baseURL: baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
             modelName: modelName,
             supportsImages: supportsImages,
             isDefault: isDefault,
-            createdAt: model?.createdAt ?? now,
+            createdAt: persistedCreatedAt ?? now,
             updatedAt: now
         )
     }
@@ -133,8 +137,10 @@ struct ModelEditorView: View {
         do {
             try AppRepository.shared.saveModel(value)
             try KeychainStore.saveAPIKey(apiKey, modelID: value.id)
+            persistedID = value.id
+            persistedCreatedAt = value.createdAt
             onSave()
-            dismiss()
+            original = current
         } catch {
             resultMessage = error.localizedDescription
         }

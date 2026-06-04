@@ -57,8 +57,21 @@ jobs:
 
       - name: Package unsigned IPA
         run: |
+          set -euo pipefail
+          APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/Lian.app"
+          INFO_PLIST="$APP_PATH/Info.plist"
+
+          test -d "$APP_PATH"
+          test -f "$INFO_PLIST"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO_PLIST")" = "com.ttan.exchat"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$INFO_PLIST")" = "Lian"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundlePackageType' "$INFO_PLIST")" = "APPL"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$INFO_PLIST")" = "AppIcon"
+          test -f "$APP_PATH/Assets.car"
+          find "$APP_PATH" -maxdepth 1 -name 'AppIcon*.png' -print -quit | grep -q .
+
           mkdir -p build/Payload
-          cp -R build/DerivedData/Build/Products/Release-iphoneos/Lian.app build/Payload/
+          cp -R "$APP_PATH" build/Payload/
           cd build
           zip -r Lian-unsigned.ipa Payload
 

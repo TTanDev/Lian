@@ -3,6 +3,8 @@ import SwiftUI
 import UIKit
 
 struct ConversationView: View {
+    @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
     let character: CharacterProfile
 
     @State private var messages: [ChatMessage] = []
@@ -11,13 +13,13 @@ struct ConversationView: View {
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var pendingImageData: Data?
     @State private var showingCamera = false
+    @State private var showingEmojiPanel = false
+    @State private var quotedMessage: ChatMessage?
     @State private var sending = false
     @State private var outgoingText = ""
     @State private var outgoingTextIsFlying = false
     @State private var errorMessage: String?
     @FocusState private var inputFocused: Bool
-
-    private let presetEmoji = ["😊", "🥺", "❤️", "😂", "抱抱", "晚安"]
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -27,7 +29,11 @@ struct ConversationView: View {
                         if shouldShowTimeHeader(at: index) {
                             TimeDivider(date: message.createdAt)
                         }
-                        MessageBubble(message: message)
+                        MessageBubble(message: message) {
+                            quotedMessage = message
+                            showingEmojiPanel = false
+                            inputFocused = true
+                        }
                             .id(message.id)
                     }
                     if sending {
@@ -63,7 +69,16 @@ struct ConversationView: View {
         }
         .navigationTitle(character.name)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("返回", systemImage: "chevron.left") {
+                    appState.isDockHidden = false
+                    dismiss()
+                }
+                .labelStyle(.iconOnly)
+            }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             inputBar
                 .background(.ultraThinMaterial)
@@ -74,7 +89,10 @@ struct ConversationView: View {
             }
             .ignoresSafeArea()
         }
-        .task { load() }
+        .task {
+            appState.isDockHidden = true
+            load()
+        }
         .onChange(of: selectedPhoto) {
             loadSelectedPhoto()
         }
@@ -95,6 +113,24 @@ struct ConversationView: View {
 
     private var inputBar: some View {
         VStack(spacing: 8) {
+            if let quotedMessage {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("引用\(quotedMessage.role == .user ? "自己" : character.name)")
+                            .font(.caption.bold())
+                        Text(quotedMessage.content)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button("取消引用", systemImage: "xmark.circle.fill") {
+                        self.quotedMessage = nil
+                    }
+                    .labelStyle(.iconOnly)
+                }
+                .padding(.horizontal)
+            }
             if let pendingImageData, let image = UIImage(data: pendingImageData) {
                 HStack {
                     Image(uiImage: image)
@@ -147,16 +183,15 @@ struct ConversationView: View {
                             .allowsHitTesting(false)
                     }
                 }
-                Menu {
-                    ForEach(presetEmoji, id: \.self) { emoji in
-                        Button(emoji) {
-                            draft += emoji
-                            inputFocused = true
-                        }
+                Button {
+                    inputFocused = false
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showingEmojiPanel.toggle()
                     }
                 } label: {
                     Image(systemName: "face.smiling")
-                        .frame(width: 42, height: 42)
+                        .font(.system(size: 26))
+                        .frame(width: 48, height: 48)
                         .background(.thinMaterial, in: Circle())
                 }
                 .accessibilityLabel("快捷表情")
@@ -169,6 +204,12 @@ struct ConversationView: View {
             }
             .padding(.horizontal)
             .padding(.vertical, 10)
+            if showingEmojiPanel {
+                EmojiPanel { emoji in
+                    draft += emoji
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
     }
 
@@ -206,10 +247,17 @@ struct ConversationView: View {
             return
         }
         sending = true
-        let content = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let typedContent = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let content: String
+        if let quotedMessage {
+            let quote = quotedMessage.content.replacingOccurrences(of: "\n", with: " ")
+            content = "回复“\(quote.prefix(48))”\n\(typedContent)"
+        } else {
+            content = typedContent
+        }
         let imageData = pendingImageData
-        if !content.isEmpty {
-            outgoingText = content
+        if !typedContent.isEmpty {
+            outgoingText = typedContent
             outgoingTextIsFlying = false
             draft = ""
             withAnimation(.easeOut(duration: 0.32)) {
@@ -225,9 +273,13 @@ struct ConversationView: View {
         }
         pendingImageData = nil
         selectedPhoto = nil
+        quotedMessage = nil
 
         Task {
             do {
+                if !typedContent.isEmpty {
+                    try? await Task.sleep(for: .milliseconds(220))
+                }
                 var paths: [String] = []
                 if let imageData {
                     guard model.supportsImages else {
@@ -301,6 +353,7 @@ private struct TimeDivider: View {
 
 private struct MessageBubble: View {
     let message: ChatMessage
+    let onReply: () -> Void
 
     private var isUser: Bool { message.role == .user }
 
@@ -323,6 +376,14 @@ private struct MessageBubble: View {
             .padding(.vertical, 11)
             .background(isUser ? Color.pink.opacity(0.82) : Color(uiColor: .secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .contextMenu {
+                Button("引用回复", systemImage: "arrowshape.turn.up.left") {
+                    onReply()
+                }
+                Button("复制", systemImage: "doc.on.doc") {
+                    UIPasteboard.general.string = message.content
+                }
+            }
             if !isUser { Spacer(minLength: 54) }
         }
     }
@@ -334,5 +395,35 @@ private struct MessageBubble: View {
             appropriateFor: nil,
             create: true
         )) ?? FileManager.default.temporaryDirectory
+    }
+}
+
+private struct EmojiPanel: View {
+    let onSelect: (String) -> Void
+
+    private let emoji = [
+        "😀", "😃", "😄", "😁", "😆", "🥹", "😂", "😊",
+        "🙂", "🙃", "😉", "😍", "🥰", "😘", "😋", "😜",
+        "🤔", "🫡", "🤗", "🤭", "🥺", "😭", "😤", "😡",
+        "❤️", "🩷", "💔", "👍", "👎", "👏", "🙏", "🎉"
+    ]
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 8)
+
+    var body: some View {
+        ScrollView {
+            LazyVGrid(columns: columns, spacing: 14) {
+                ForEach(emoji, id: \.self) { item in
+                    Button(item) {
+                        onSelect(item)
+                    }
+                    .font(.system(size: 32))
+                    .frame(width: 42, height: 42)
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(14)
+        }
+        .frame(height: 230)
+        .background(Color(uiColor: .secondarySystemBackground))
     }
 }

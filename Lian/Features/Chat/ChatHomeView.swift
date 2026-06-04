@@ -32,7 +32,6 @@ struct ChatHomeView: View {
                 }
             }
             .navigationTitle("聊天")
-            .toolbar(.visible, for: .tabBar)
             .task { load() }
             .refreshable { load() }
             .alert("读取失败", isPresented: .constant(errorMessage != nil)) {

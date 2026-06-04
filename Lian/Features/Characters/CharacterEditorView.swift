@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 
 struct CharacterEditorView: View {
+    @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
     let character: CharacterProfile?
     let onSave: () -> Void
@@ -90,11 +91,23 @@ struct CharacterEditorView: View {
             }
         }
         .navigationTitle(character == nil ? "新角色" : "编辑角色")
-        .toolbar(.hidden, for: .tabBar)
+        .navigationBarBackButtonHidden(character != nil)
         .toolbar {
-            if character == nil {
+            if let character {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("返回", systemImage: "chevron.left") {
+                        appState.isDockHidden = false
+                        dismiss()
+                    }
+                    .labelStyle(.iconOnly)
+                    .accessibilityLabel("返回\(character.name)")
+                }
+            } else {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
+                    Button("关闭") {
+                        appState.isDockHidden = false
+                        dismiss()
+                    }
                 }
             }
             ToolbarItemGroup(placement: .confirmationAction) {
@@ -107,7 +120,15 @@ struct CharacterEditorView: View {
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || !isDirty)
             }
         }
-        .onAppear(perform: populate)
+        .onAppear {
+            appState.isDockHidden = true
+            populate()
+        }
+        .onDisappear {
+            if character == nil {
+                appState.isDockHidden = false
+            }
+        }
         .onChange(of: avatarItem) {
             loadAvatar()
         }
@@ -201,6 +222,7 @@ struct CharacterEditorView: View {
                 )
             )
             onSave()
+            appState.isDockHidden = false
             dismiss()
         } catch {
             errorMessage = error.localizedDescription

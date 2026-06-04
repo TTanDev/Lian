@@ -35,7 +35,6 @@ struct ProactiveMessageSchedulerView: View {
             }
         }
         .navigationTitle("主动消息")
-        .toolbar(.hidden, for: .tabBar)
         .task { load() }
         .alert("操作失败", isPresented: .constant(errorMessage != nil)) {
             Button("好") { errorMessage = nil }

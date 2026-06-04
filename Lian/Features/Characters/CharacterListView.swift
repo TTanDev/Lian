@@ -33,7 +33,6 @@ struct CharacterListView: View {
                 }
             }
             .navigationTitle("角色")
-            .toolbar(.visible, for: .tabBar)
             .toolbar {
                 Button("添加", systemImage: "plus") {
                     showingEditor = true

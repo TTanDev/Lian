@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct ModelEditorView: View {
+    @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
     let model: APIModel?
     let onSave: () -> Void
@@ -14,6 +15,8 @@ struct ModelEditorView: View {
     @State private var isDefault = true
     @State private var testing = false
     @State private var resultMessage: String?
+    @State private var original = ModelDraft.empty
+    @State private var showingDiscardConfirmation = false
 
     var body: some View {
         Form {
@@ -42,20 +45,53 @@ struct ModelEditorView: View {
             }
         }
         .navigationTitle(model == nil ? "添加模型" : "编辑模型")
-        .toolbar(.hidden, for: .tabBar)
+        .navigationBarBackButtonHidden(model != nil)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("取消") { dismiss() }
+            if let model {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("返回", systemImage: "chevron.left") {
+                        appState.isDockHidden = false
+                        dismiss()
+                    }
+                    .labelStyle(.iconOnly)
+                    .accessibilityLabel("返回\(model.displayName)")
+                }
+            } else {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") {
+                        appState.isDockHidden = false
+                        dismiss()
+                    }
+                }
             }
-            ToolbarItem(placement: .confirmationAction) {
-                Button("保存") { save() }.disabled(!canSave)
+            ToolbarItemGroup(placement: .confirmationAction) {
+                if isDirty {
+                    Button("取消更改") {
+                        showingDiscardConfirmation = true
+                    }
+                }
+                Button("保存") { save() }.disabled(!canSave || !isDirty)
             }
         }
-        .onAppear(perform: populate)
+        .onAppear {
+            appState.isDockHidden = true
+            populate()
+        }
+        .onDisappear {
+            if model == nil {
+                appState.isDockHidden = false
+            }
+        }
         .alert("模型", isPresented: .constant(resultMessage != nil)) {
             Button("好") { resultMessage = nil }
         } message: {
             Text(resultMessage ?? "")
+        }
+        .confirmationDialog("确定放弃尚未保存的更改？", isPresented: $showingDiscardConfirmation, titleVisibility: .visible) {
+            Button("放弃更改", role: .destructive) {
+                apply(original)
+            }
+            Button("继续编辑", role: .cancel) {}
         }
     }
 
@@ -63,14 +99,41 @@ struct ModelEditorView: View {
         !displayName.isEmpty && !baseURL.isEmpty && !modelName.isEmpty
     }
 
+    private var current: ModelDraft {
+        ModelDraft(
+            displayName: displayName,
+            baseURL: baseURL,
+            modelName: modelName,
+            apiKey: apiKey,
+            supportsImages: supportsImages,
+            isDefault: isDefault
+        )
+    }
+
+    private var isDirty: Bool { current != original }
+
     private func populate() {
-        guard let model else { return }
-        displayName = model.displayName
-        baseURL = model.baseURL
-        modelName = model.modelName
-        apiKey = KeychainStore.apiKey(modelID: model.id)
-        supportsImages = model.supportsImages
-        isDefault = model.isDefault
+        let value = model.map {
+            ModelDraft(
+                displayName: $0.displayName,
+                baseURL: $0.baseURL,
+                modelName: $0.modelName,
+                apiKey: KeychainStore.apiKey(modelID: $0.id),
+                supportsImages: $0.supportsImages,
+                isDefault: $0.isDefault
+            )
+        } ?? .empty
+        original = value
+        apply(value)
+    }
+
+    private func apply(_ value: ModelDraft) {
+        displayName = value.displayName
+        baseURL = value.baseURL
+        modelName = value.modelName
+        apiKey = value.apiKey
+        supportsImages = value.supportsImages
+        isDefault = value.isDefault
     }
 
     private func draft() -> APIModel {
@@ -93,6 +156,7 @@ struct ModelEditorView: View {
             try AppRepository.shared.saveModel(value)
             try KeychainStore.saveAPIKey(apiKey, modelID: value.id)
             onSave()
+            appState.isDockHidden = false
             dismiss()
         } catch {
             resultMessage = error.localizedDescription
@@ -142,4 +206,22 @@ struct ModelEditorView: View {
         }
         return image.jpegData(compressionQuality: 0.9)!
     }
+}
+
+private struct ModelDraft: Equatable {
+    var displayName: String
+    var baseURL: String
+    var modelName: String
+    var apiKey: String
+    var supportsImages: Bool
+    var isDefault: Bool
+
+    static let empty = ModelDraft(
+        displayName: "",
+        baseURL: "",
+        modelName: "",
+        apiKey: "",
+        supportsImages: false,
+        isDefault: true
+    )
 }

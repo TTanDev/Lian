@@ -75,6 +75,23 @@ final class AppRepository: @unchecked Sendable {
         try database.run("DELETE FROM api_models WHERE id = ?", values: [.text(id)])
     }
 
+    func setting(key: String) throws -> String? {
+        try database.rows(
+            "SELECT value FROM app_settings WHERE key = ? LIMIT 1",
+            values: [.text(key)]
+        ).first?["value"]?.string
+    }
+
+    func saveSetting(key: String, value: String) throws {
+        try database.run(
+            """
+            INSERT INTO app_settings(key, value, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            values: [.text(key), .text(value), .integer(Date().milliseconds)]
+        )
+    }
+
     func messages(characterID: String) throws -> [ChatMessage] {
         let messageRows = try database.rows(
             "SELECT * FROM chat_messages WHERE character_id = ? ORDER BY created_at ASC",

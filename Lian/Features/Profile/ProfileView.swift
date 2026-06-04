@@ -1,11 +1,14 @@
 import SwiftUI
 
 struct ProfileView: View {
+    @Environment(AppState.self) private var appState
     @State private var characterCount = 0
     @State private var modelCount = 0
     @State private var learningCount = 0
 
     var body: some View {
+        @Bindable var appState = appState
+
         NavigationStack {
             List {
                 Section("数据") {
@@ -23,6 +26,17 @@ struct ProfileView: View {
                         }
                     }
                 }
+                Section("主题") {
+                    Picker("外观", selection: $appState.theme) {
+                        ForEach(AppTheme.allCases) { theme in
+                            Text(theme.title).tag(theme)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: appState.theme) {
+                        try? AppRepository.shared.saveSetting(key: "appearance.theme", value: appState.theme.rawValue)
+                    }
+                }
                 Section("关于") {
                     LabeledContent("应用", value: "Lian")
                     LabeledContent("原生版本", value: "1.0")
@@ -32,7 +46,6 @@ struct ProfileView: View {
                 }
             }
             .navigationTitle("我的")
-            .toolbar(.visible, for: .tabBar)
             .task { load() }
         }
     }

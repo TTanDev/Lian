@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDisplayName</key>
+    <string>Lian</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>用于选择并发送聊天图片。</string>
+    <key>NSCameraUsageDescription</key>
+    <string>用于拍摄并发送聊天图片。</string>
+    <key>NSUserNotificationsUsageDescription</key>
+    <string>用于在你安排的时间显示角色主动消息。</string>
+    <key>UILaunchScreen</key>
+    <dict/>
+</dict>
+</plist>

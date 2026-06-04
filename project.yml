@@ -1,0 +1,33 @@
+name: Lian
+options:
+  bundleIdPrefix: com.ttan
+  deploymentTarget:
+    iOS: "26.0"
+  xcodeVersion: "26.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    PRODUCT_BUNDLE_IDENTIFIER: com.ttan.exchat
+targets:
+  Lian:
+    type: application
+    platform: iOS
+    sources:
+      - path: Lian
+    settings:
+      base:
+        INFOPLIST_FILE: Lian/Resources/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_STYLE: Automatic
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 1.0.0
+        TARGETED_DEVICE_FAMILY: "1"
+    dependencies:
+      - sdk: libsqlite3.tbd
+  LianTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: LianTests
+    dependencies:
+      - target: Lian

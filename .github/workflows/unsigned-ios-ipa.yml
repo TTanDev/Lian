@@ -2,55 +2,41 @@ name: Build unsigned iOS IPA
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: macos-26
+    timeout-minutes: 30
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
+      - name: Install XcodeGen
+        run: brew install xcodegen
 
-      - name: Install JS dependencies
-        run: npm ci
+      - name: Generate Xcode project
+        run: xcodegen generate
 
-      - name: Prebuild iOS project
-        run: npx expo prebuild --platform ios --clean --non-interactive
-
-      - name: Install CocoaPods
-        working-directory: ios
-        run: pod install
-
-      - name: Build unsigned app
+      - name: Build app without signing
         run: |
           set -euo pipefail
-          WORKSPACE="$(find ios -maxdepth 1 -name '*.xcworkspace' | head -n 1)"
-          if [ -z "${WORKSPACE}" ]; then
-            echo "No Xcode workspace found"
-            exit 1
-          fi
-          APP_SCHEME="$(xcodebuild -list -json -workspace "${WORKSPACE}" | python3 -c "import json,sys; data=json.load(sys.stdin); print(data['workspace']['schemes'][0])")"
+          xcodebuild -version
           xcodebuild \
-            -workspace "${WORKSPACE}" \
-            -scheme "${APP_SCHEME}" \
+            -project Lian.xcodeproj \
+            -scheme Lian \
             -configuration Release \
             -sdk iphoneos \
-            -destination "generic/platform=iOS" \
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
             clean build 2>&1 | tee xcodebuild.log
 
-      - name: Upload xcodebuild log
+      - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -59,19 +45,14 @@ jobs:
 
       - name: Package unsigned IPA
         run: |
-          set -euo pipefail
-          APP_PATH="$(find build/DerivedData/Build/Products/Release-iphoneos -name '*.app' -maxdepth 1 | head -n 1)"
-          if [ -z "${APP_PATH}" ]; then
-            echo "No .app found"
-            exit 1
-          fi
-          rm -rf Payload unsigned-ipa
-          mkdir -p Payload unsigned-ipa
-          cp -R "${APP_PATH}" Payload/
-          /usr/bin/zip -qry unsigned-ipa/Lian-unsigned.ipa Payload
+          mkdir -p build/Payload
+          cp -R build/DerivedData/Build/Products/Release-iphoneos/Lian.app build/Payload/
+          cd build
+          zip -r Lian-unsigned.ipa Payload
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Lian-unsigned-ipa
-          path: unsigned-ipa/Lian-unsigned.ipa
+          name: Lian-unsigned
+          path: build/Lian-unsigned.ipa
+          if-no-files-found: error

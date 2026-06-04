@@ -21,6 +21,18 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Compile unit tests
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project Lian.xcodeproj \
+            -scheme Lian \
+            -sdk iphonesimulator \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath build/TestDerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            build-for-testing
+
       - name: Build app without signing
         run: |
           set -euo pipefail

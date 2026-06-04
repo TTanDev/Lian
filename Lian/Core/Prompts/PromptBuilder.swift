@@ -1,7 +1,11 @@
 import Foundation
 
 enum PromptBuilder {
-    static func chat(character: CharacterProfile, messages: [ChatMessage]) -> [PromptMessage] {
+    static func chat(
+        character: CharacterProfile,
+        messages: [ChatMessage],
+        learnedSources: [LearningSource] = []
+    ) -> [PromptMessage] {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
@@ -16,6 +20,8 @@ enum PromptBuilder {
         共同记忆：\(character.sharedMemories)
         说话习惯：\(character.speechStyle)
         雷点：\(character.triggers)
+        已学习资料：
+        \(learnedSources.filter { $0.status == .learned }.map(\.summary).filter { !$0.isEmpty }.joined(separator: "\n\n"))
         """
 
         return [PromptMessage(role: "system", content: system)] + messages.suffix(30).map {

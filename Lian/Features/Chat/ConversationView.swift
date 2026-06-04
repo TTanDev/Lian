@@ -7,9 +7,11 @@ struct ConversationView: View {
 
     @State private var messages: [ChatMessage] = []
     @State private var models: [APIModel] = []
+    @State private var learnedSources: [LearningSource] = []
     @State private var draft = ""
-    @State private var selectedPhoto: PhotosPickerItem?
-    @State private var pendingImageData: Data?
+    @State private var selectedPhotos: [PhotosPickerItem] = []
+    @State private var pendingImageData: [Data] = []
+    @State private var showingPhotoPicker = false
     @State private var showingCamera = false
     @State private var quotedMessage: ChatMessage?
     @State private var sending = false
@@ -73,13 +75,19 @@ struct ConversationView: View {
         }
         .sheet(isPresented: $showingCamera) {
             CameraPicker { data in
-                pendingImageData = data
+                pendingImageData.append(data)
             }
             .ignoresSafeArea()
         }
+        .photosPicker(
+            isPresented: $showingPhotoPicker,
+            selection: $selectedPhotos,
+            maxSelectionCount: 10,
+            matching: .images
+        )
         .task { load() }
-        .onChange(of: selectedPhoto) {
-            loadSelectedPhoto()
+        .onChange(of: selectedPhotos) {
+            loadSelectedPhotos()
         }
         .alert("聊天失败", isPresented: .constant(errorMessage != nil)) {
             Button("好") { errorMessage = nil }
@@ -116,21 +124,25 @@ struct ConversationView: View {
                 }
                 .padding(.horizontal)
             }
-            if let pendingImageData, let image = UIImage(data: pendingImageData) {
-                HStack {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 54, height: 54)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    Text("图片已准备发送")
-                        .font(.subheadline)
-                    Spacer()
-                    Button("移除", systemImage: "xmark.circle.fill") {
-                        self.pendingImageData = nil
-                        selectedPhoto = nil
+            if !pendingImageData.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack {
+                        ForEach(Array(pendingImageData.enumerated()), id: \.offset) { index, data in
+                            if let image = UIImage(data: data) {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 58, height: 58)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    .overlay(alignment: .topTrailing) {
+                                        Button("移除", systemImage: "xmark.circle.fill") {
+                                            pendingImageData.remove(at: index)
+                                        }
+                                        .labelStyle(.iconOnly)
+                                    }
+                            }
+                        }
                     }
-                    .labelStyle(.iconOnly)
                 }
                 .padding(.horizontal)
             }
@@ -140,8 +152,8 @@ struct ConversationView: View {
                         showingCamera = true
                     }
                     .disabled(selectedModel?.supportsImages != true)
-                    PhotosPicker(selection: $selectedPhoto, matching: .images) {
-                        Label("照片", systemImage: "photo.on.rectangle")
+                    Button("照片", systemImage: "photo.on.rectangle") {
+                        showingPhotoPicker = true
                     }
                     .disabled(selectedModel?.supportsImages != true)
                 } label: {
@@ -164,7 +176,7 @@ struct ConversationView: View {
                 }
                 .labelStyle(.iconOnly)
                 .font(.system(size: 34))
-                .disabled(sending || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pendingImageData == nil))
+                .disabled(sending || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pendingImageData.isEmpty))
             }
             .padding(.horizontal)
             .padding(.vertical, 10)
@@ -183,16 +195,20 @@ struct ConversationView: View {
         do {
             messages = try AppRepository.shared.messages(characterID: character.id)
             models = try AppRepository.shared.models()
+            learnedSources = try AppRepository.shared.learningSources().filter { $0.characterID == character.id }
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    private func loadSelectedPhoto() {
-        guard let selectedPhoto else { return }
+    private func loadSelectedPhotos() {
+        let items = selectedPhotos
         Task {
             do {
-                pendingImageData = try await selectedPhoto.loadTransferable(type: Data.self)
+                pendingImageData = try await items.asyncCompactMap {
+                    guard let data = try await $0.loadTransferable(type: Data.self) else { return nil }
+                    return try ImageDataNormalizer.jpegData(from: data)
+                }
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -216,19 +232,21 @@ struct ConversationView: View {
         let imageData = pendingImageData
         let messageID = UUID().uuidString
         draft = ""
-        pendingImageData = nil
-        selectedPhoto = nil
+        pendingImageData = []
+        selectedPhotos = []
         quotedMessage = nil
 
         Task {
             do {
                 var paths: [String] = []
-                if let imageData {
+                if !imageData.isEmpty {
                     guard model.supportsImages else {
                         throw ChatAPIError.server("当前模型未开启图片功能")
                     }
                     let store = try AttachmentStore()
-                    paths = [try await store.importImageData(imageData, attachmentID: UUID().uuidString)]
+                    for data in imageData {
+                        paths.append(try await store.importImageData(data, attachmentID: UUID().uuidString))
+                    }
                 }
                 let userMessage = try AppRepository.shared.addMessage(
                     id: messageID,
@@ -244,7 +262,11 @@ struct ConversationView: View {
                 try? await Task.sleep(for: .milliseconds(380))
                 animatedMessageID = nil
 
-                let prompt = PromptBuilder.chat(character: character, messages: messages)
+                let prompt = PromptBuilder.chat(
+                    character: character,
+                    messages: messages,
+                    learnedSources: learnedSources
+                )
                 let rawReply = try await ChatAPIClient().reply(
                     model: model,
                     apiKey: KeychainStore.apiKey(modelID: model.id),
@@ -274,6 +296,18 @@ struct ConversationView: View {
                 proxy.scrollTo("conversation-bottom", anchor: .bottom)
             }
         }
+    }
+}
+
+private extension Array {
+    func asyncCompactMap<T>(_ transform: (Element) async throws -> T?) async rethrows -> [T] {
+        var values: [T] = []
+        for element in self {
+            if let value = try await transform(element) {
+                values.append(value)
+            }
+        }
+        return values
     }
 }
 

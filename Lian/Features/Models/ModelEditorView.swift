@@ -159,7 +159,7 @@ struct ModelEditorView: View {
                             content: supportsImages ? "请识别这张测试图片，并只回复“图片测试成功”" : "只回复 OK"
                         )
                     ],
-                    latestImageData: supportsImages ? Self.visionTestImage : nil
+                    latestImageData: supportsImages ? [Self.visionTestImage] : []
                 )
                 resultMessage = supportsImages
                     ? "连接与图片发送成功：\(MessageSanitizer.clean(response))"

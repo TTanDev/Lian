@@ -25,7 +25,7 @@
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>用于选择并发送聊天图片。</string>
+    <string>用于选择聊天图片和角色学习资料。</string>
     <key>NSCameraUsageDescription</key>
     <string>用于拍摄并发送聊天图片。</string>
     <key>NSUserNotificationsUsageDescription</key>

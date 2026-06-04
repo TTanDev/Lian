@@ -179,33 +179,76 @@ final class AppRepository: @unchecked Sendable {
     }
 
     func learningSources() throws -> [LearningSource] {
-        try database.rows("SELECT * FROM learning_sources ORDER BY created_at DESC").map {
+        try database.rows("SELECT * FROM learning_sources ORDER BY created_at DESC").map { row in
+            let sourceID = text(row, "id")
             LearningSource(
-                id: text($0, "id"),
-                characterID: text($0, "character_id"),
-                title: text($0, "title"),
-                rawText: text($0, "raw_text"),
-                summary: text($0, "summary"),
-                status: LearningSource.Status(rawValue: text($0, "status")) ?? .pending,
-                createdAt: date($0, "created_at"),
-                updatedAt: date($0, "updated_at")
+                id: sourceID,
+                characterID: text(row, "character_id"),
+                modelID: optional(row, "model_id") ?? "",
+                rawText: text(row, "raw_text"),
+                summary: text(row, "summary"),
+                status: LearningSource.Status(rawValue: text(row, "status")) ?? .failed,
+                imagePaths: try learningSourceImagePaths(sourceID: sourceID),
+                errorMessage: optional(row, "error_message"),
+                createdAt: date(row, "created_at"),
+                updatedAt: date(row, "updated_at")
             )
         }
     }
 
     func saveLearningSource(_ source: LearningSource) throws {
+        try database.transaction {
+            try database.run(
+                """
+                INSERT INTO learning_sources (
+                  id, character_id, type, title, raw_text, summary, status, model_id,
+                  error_message, created_at, updated_at
+                ) VALUES (?, ?, 'mixed', '学习资料', ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET raw_text = excluded.raw_text,
+                  summary = excluded.summary, status = excluded.status, model_id = excluded.model_id,
+                  error_message = excluded.error_message, updated_at = excluded.updated_at
+                """,
+                values: [
+                    .text(source.id), .text(source.characterID), .text(source.rawText),
+                    .text(source.summary), .text(source.status.rawValue), .text(source.modelID),
+                    optionalText(source.errorMessage), .integer(source.createdAt.milliseconds),
+                    .integer(source.updatedAt.milliseconds)
+                ]
+            )
+            try database.run(
+                "DELETE FROM learning_source_images WHERE learning_source_id = ?",
+                values: [.text(source.id)]
+            )
+            for path in source.imagePaths {
+                try database.run(
+                    """
+                    INSERT INTO learning_source_images(id, learning_source_id, local_path, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    values: [
+                        .text(UUID().uuidString), .text(source.id), .text(path),
+                        .integer(source.createdAt.milliseconds)
+                    ]
+                )
+            }
+        }
+    }
+
+    func updateLearningSourceStatus(
+        id: String,
+        status: LearningSource.Status,
+        summary: String? = nil,
+        errorMessage: String? = nil
+    ) throws {
         try database.run(
             """
-            INSERT INTO learning_sources (
-              id, character_id, type, title, raw_text, summary, status, created_at, updated_at
-            ) VALUES (?, ?, 'text', ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET title = excluded.title, raw_text = excluded.raw_text,
-              summary = excluded.summary, status = excluded.status, updated_at = excluded.updated_at
+            UPDATE learning_sources
+            SET status = ?, summary = COALESCE(?, summary), error_message = ?, updated_at = ?
+            WHERE id = ?
             """,
             values: [
-                .text(source.id), .text(source.characterID), .text(source.title), .text(source.rawText),
-                .text(source.summary), .text(source.status.rawValue),
-                .integer(source.createdAt.milliseconds), .integer(source.updatedAt.milliseconds)
+                .text(status.rawValue), optionalText(summary), optionalText(errorMessage),
+                .integer(Date().milliseconds), .text(id)
             ]
         )
     }
@@ -291,6 +334,13 @@ final class AppRepository: @unchecked Sendable {
                 createdAt: date(row, "created_at")
             )
         }
+    }
+
+    private func learningSourceImagePaths(sourceID: String) throws -> [String] {
+        try database.rows(
+            "SELECT local_path FROM learning_source_images WHERE learning_source_id = ? ORDER BY created_at ASC",
+            values: [.text(sourceID)]
+        ).map { text($0, "local_path") }
     }
 
     private func mapCharacter(_ row: [String: SQLiteValue]) -> CharacterProfile {

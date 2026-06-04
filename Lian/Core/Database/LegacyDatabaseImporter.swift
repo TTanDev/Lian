@@ -126,8 +126,15 @@ actor LegacyDatabaseImporter {
             INSERT OR IGNORE INTO learning_sources (
               id, character_id, type, title, local_path, raw_text, summary, status, created_at, updated_at
             )
-            SELECT id, ex_id, type, title, local_uri, raw_text, summary, status, created_at, updated_at
+            SELECT id, ex_id, type, title, local_uri, raw_text, summary,
+              CASE WHEN status = 'pending' THEN 'failed' ELSE status END,
+              created_at, updated_at
             FROM legacy.learning_sources;
+
+            INSERT OR IGNORE INTO learning_source_images(id, learning_source_id, local_path, created_at)
+            SELECT lower(hex(randomblob(16))), id, local_uri, created_at
+            FROM legacy.learning_sources
+            WHERE local_uri IS NOT NULL AND local_uri != '';
 
             INSERT OR IGNORE INTO memories (
               id, character_id, type, title, body, importance, source, created_at, updated_at

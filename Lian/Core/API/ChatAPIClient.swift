@@ -26,7 +26,7 @@ struct ChatAPIClient {
         model: APIModel,
         apiKey: String,
         messages: [PromptMessage],
-        latestImageData: Data? = nil
+        latestImageData: [Data] = []
     ) async throws -> String {
         guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ChatAPIError.missingKey
@@ -45,18 +45,19 @@ struct ChatAPIClient {
             guard index == messages.indices.last,
                   message.role == "user",
                   model.supportsImages,
-                  let latestImageData else {
+                  !latestImageData.isEmpty else {
                 return ["role": message.role, "content": message.content]
             }
+            let images: [[String: Any]] = latestImageData.map { imageData in
+                [
+                    "type": "image_url",
+                    "image_url": ["url": "data:image/jpeg;base64,\(imageData.base64EncodedString())"]
+                ]
+            }
+            let textContent: [String: Any] = ["type": "text", "text": message.content]
             return [
                 "role": message.role,
-                "content": [
-                    ["type": "text", "text": message.content],
-                    [
-                        "type": "image_url",
-                        "image_url": ["url": "data:image/jpeg;base64,\(latestImageData.base64EncodedString())"]
-                    ]
-                ]
+                "content": [textContent] + images
             ]
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: [

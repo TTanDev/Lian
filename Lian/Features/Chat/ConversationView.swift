@@ -24,8 +24,8 @@ struct ConversationView: View {
             ScrollView {
                 LazyVStack(spacing: 14) {
                     ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
-                        if shouldShowDateHeader(at: index) {
-                            DateDivider(date: message.createdAt)
+                        if shouldShowTimeHeader(at: index) {
+                            TimeDivider(date: message.createdAt)
                         }
                         MessageBubble(message: message)
                             .id(message.id)
@@ -172,9 +172,12 @@ struct ConversationView: View {
         }
     }
 
-    private func shouldShowDateHeader(at index: Int) -> Bool {
+    private func shouldShowTimeHeader(at index: Int) -> Bool {
         guard index > 0 else { return true }
-        return !Calendar.current.isDate(messages[index - 1].createdAt, inSameDayAs: messages[index].createdAt)
+        let previous = messages[index - 1].createdAt
+        let current = messages[index].createdAt
+        return !Calendar.current.isDate(previous, inSameDayAs: current)
+            || current.timeIntervalSince(previous) >= 5 * 60
     }
 
     private func load() {
@@ -273,17 +276,26 @@ struct ConversationView: View {
     }
 }
 
-private struct DateDivider: View {
+private struct TimeDivider: View {
     let date: Date
 
     var body: some View {
-        Text(date.formatted(
-            Date.FormatStyle(date: .long)
-                .locale(Locale(identifier: "zh_CN"))
-        ))
+        Text(label)
         .font(.caption)
         .foregroundStyle(.secondary)
         .padding(.vertical, 4)
+    }
+
+    private var label: String {
+        let style: Date.FormatStyle
+        if Calendar.current.isDateInToday(date) {
+            style = Date.FormatStyle(date: .omitted, time: .shortened)
+        } else if Calendar.current.isDateInYesterday(date) {
+            return "昨天 \(date.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(Locale(identifier: "zh_CN"))))"
+        } else {
+            style = Date.FormatStyle(date: .abbreviated, time: .shortened)
+        }
+        return date.formatted(style.locale(Locale(identifier: "zh_CN")))
     }
 }
 
@@ -306,12 +318,6 @@ private struct MessageBubble: View {
                     Text(message.content)
                         .textSelection(.enabled)
                 }
-                Text(message.createdAt.formatted(
-                    Date.FormatStyle(date: .abbreviated, time: .shortened)
-                        .locale(Locale(identifier: "zh_CN"))
-                ))
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 11)

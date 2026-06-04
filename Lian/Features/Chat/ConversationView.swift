@@ -13,10 +13,11 @@ struct ConversationView: View {
     @State private var showingCamera = false
     @State private var quotedMessage: ChatMessage?
     @State private var sending = false
-    @State private var outgoingText = ""
-    @State private var outgoingTextIsFlying = false
+    @State private var matchedMessageID: String?
+    @State private var matchedText = ""
     @State private var errorMessage: String?
     @FocusState private var inputFocused: Bool
+    @Namespace private var sendNamespace
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -26,7 +27,11 @@ struct ConversationView: View {
                         if shouldShowTimeHeader(at: index) {
                             TimeDivider(date: message.createdAt)
                         }
-                        MessageBubble(message: message) {
+                        MessageBubble(
+                            message: message,
+                            matchedMessageID: matchedMessageID,
+                            namespace: sendNamespace
+                        ) {
                             quotedMessage = message
                             inputFocused = true
                         }
@@ -156,13 +161,17 @@ struct ConversationView: View {
                         .padding(.horizontal, 14)
                         .padding(.vertical, 11)
                         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    if !outgoingText.isEmpty {
-                        Text(outgoingText)
+                    if let matchedMessageID, !matchedText.isEmpty {
+                        Text(matchedText)
                             .lineLimit(1)
                             .padding(.horizontal, 14)
-                            .offset(y: outgoingTextIsFlying ? -58 : 0)
-                            .scaleEffect(outgoingTextIsFlying ? 0.92 : 1, anchor: .leading)
-                            .opacity(outgoingTextIsFlying ? 0 : 1)
+                            .matchedGeometryEffect(
+                                id: matchedMessageID,
+                                in: sendNamespace,
+                                properties: .position,
+                                anchor: .leading,
+                                isSource: true
+                            )
                             .allowsHitTesting(false)
                     }
                 }
@@ -221,30 +230,18 @@ struct ConversationView: View {
             content = typedContent
         }
         let imageData = pendingImageData
+        let messageID = UUID().uuidString
         if !typedContent.isEmpty {
-            outgoingText = typedContent
-            outgoingTextIsFlying = false
-            draft = ""
-            withAnimation(.easeOut(duration: 0.32)) {
-                outgoingTextIsFlying = true
-            }
-            Task {
-                try? await Task.sleep(for: .milliseconds(340))
-                outgoingText = ""
-                outgoingTextIsFlying = false
-            }
-        } else {
-            draft = ""
+            matchedMessageID = messageID
+            matchedText = typedContent
         }
+        draft = ""
         pendingImageData = nil
         selectedPhoto = nil
         quotedMessage = nil
 
         Task {
             do {
-                if !typedContent.isEmpty {
-                    try? await Task.sleep(for: .milliseconds(220))
-                }
                 var paths: [String] = []
                 if let imageData {
                     guard model.supportsImages else {
@@ -254,12 +251,23 @@ struct ConversationView: View {
                     paths = [try await store.importImageData(imageData, attachmentID: UUID().uuidString)]
                 }
                 let userMessage = try AppRepository.shared.addMessage(
+                    id: messageID,
                     characterID: character.id,
                     role: .user,
                     content: content,
                     attachmentPaths: paths
                 )
-                messages.append(userMessage)
+                if !typedContent.isEmpty {
+                    await Task.yield()
+                    withAnimation(.easeOut(duration: 0.34)) {
+                        messages.append(userMessage)
+                    }
+                    try? await Task.sleep(for: .milliseconds(360))
+                    matchedMessageID = nil
+                    matchedText = ""
+                } else {
+                    messages.append(userMessage)
+                }
 
                 let prompt = PromptBuilder.chat(character: character, messages: messages)
                 let rawReply = try await ChatAPIClient().reply(
@@ -276,6 +284,8 @@ struct ConversationView: View {
                 )
                 messages.append(assistantMessage)
             } catch {
+                matchedMessageID = nil
+                matchedText = ""
                 errorMessage = error.localizedDescription
             }
             sending = false
@@ -318,6 +328,8 @@ private struct TimeDivider: View {
 
 private struct MessageBubble: View {
     let message: ChatMessage
+    let matchedMessageID: String?
+    let namespace: Namespace.ID
     let onReply: () -> Void
 
     private var isUser: Bool { message.role == .user }
@@ -335,6 +347,13 @@ private struct MessageBubble: View {
                 if !message.content.isEmpty {
                     Text(message.content)
                         .textSelection(.enabled)
+                        .modifier(
+                            SendTextGeometry(
+                                active: matchedMessageID == message.id,
+                                id: message.id,
+                                namespace: namespace
+                            )
+                        )
                 }
             }
             .padding(.horizontal, 14)
@@ -360,5 +379,26 @@ private struct MessageBubble: View {
             appropriateFor: nil,
             create: true
         )) ?? FileManager.default.temporaryDirectory
+    }
+}
+
+private struct SendTextGeometry: ViewModifier {
+    let active: Bool
+    let id: String
+    let namespace: Namespace.ID
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if active {
+            content.matchedGeometryEffect(
+                id: id,
+                in: namespace,
+                properties: .position,
+                anchor: .leading,
+                isSource: false
+            )
+        } else {
+            content
+        }
     }
 }

@@ -122,13 +122,14 @@ final class AppRepository: @unchecked Sendable {
     }
 
     func addMessage(
+        id: String = UUID().uuidString,
         characterID: String,
         role: ChatMessage.Role,
         content: String,
         attachmentPaths: [String] = []
     ) throws -> ChatMessage {
         let now = Date()
-        let messageID = UUID().uuidString
+        let messageID = id
         var attachments: [ChatAttachment] = []
 
         try database.transaction {

@@ -48,6 +48,7 @@ struct ProfileView: View {
             .navigationTitle("我的")
             .task { load() }
         }
+        .background(NavigationTabBarCoordinator().frame(width: 0, height: 0))
     }
 
     private func load() {

@@ -3,8 +3,6 @@ import SwiftUI
 import UIKit
 
 struct ConversationView: View {
-    @Environment(AppState.self) private var appState
-    @Environment(\.dismiss) private var dismiss
     let character: CharacterProfile
 
     @State private var messages: [ChatMessage] = []
@@ -13,7 +11,6 @@ struct ConversationView: View {
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var pendingImageData: Data?
     @State private var showingCamera = false
-    @State private var showingEmojiPanel = false
     @State private var quotedMessage: ChatMessage?
     @State private var sending = false
     @State private var outgoingText = ""
@@ -31,7 +28,6 @@ struct ConversationView: View {
                         }
                         MessageBubble(message: message) {
                             quotedMessage = message
-                            showingEmojiPanel = false
                             inputFocused = true
                         }
                             .id(message.id)
@@ -69,16 +65,7 @@ struct ConversationView: View {
         }
         .navigationTitle(character.name)
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(true)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button("返回", systemImage: "chevron.left") {
-                    appState.isDockHidden = false
-                    dismiss()
-                }
-                .labelStyle(.iconOnly)
-            }
-        }
+        .toolbar(.hidden, for: .tabBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             inputBar
                 .background(.ultraThinMaterial)
@@ -89,10 +76,7 @@ struct ConversationView: View {
             }
             .ignoresSafeArea()
         }
-        .task {
-            appState.isDockHidden = true
-            load()
-        }
+        .task { load() }
         .onChange(of: selectedPhoto) {
             loadSelectedPhoto()
         }
@@ -183,18 +167,6 @@ struct ConversationView: View {
                             .allowsHitTesting(false)
                     }
                 }
-                Button {
-                    inputFocused = false
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        showingEmojiPanel.toggle()
-                    }
-                } label: {
-                    Image(systemName: "face.smiling")
-                        .font(.system(size: 26))
-                        .frame(width: 48, height: 48)
-                        .background(.thinMaterial, in: Circle())
-                }
-                .accessibilityLabel("快捷表情")
                 Button("发送", systemImage: "arrow.up.circle.fill") {
                     send()
                 }
@@ -204,12 +176,6 @@ struct ConversationView: View {
             }
             .padding(.horizontal)
             .padding(.vertical, 10)
-            if showingEmojiPanel {
-                EmojiPanel { emoji in
-                    draft += emoji
-                }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
         }
     }
 
@@ -395,35 +361,5 @@ private struct MessageBubble: View {
             appropriateFor: nil,
             create: true
         )) ?? FileManager.default.temporaryDirectory
-    }
-}
-
-private struct EmojiPanel: View {
-    let onSelect: (String) -> Void
-
-    private let emoji = [
-        "😀", "😃", "😄", "😁", "😆", "🥹", "😂", "😊",
-        "🙂", "🙃", "😉", "😍", "🥰", "😘", "😋", "😜",
-        "🤔", "🫡", "🤗", "🤭", "🥺", "😭", "😤", "😡",
-        "❤️", "🩷", "💔", "👍", "👎", "👏", "🙏", "🎉"
-    ]
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 8)
-
-    var body: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: 14) {
-                ForEach(emoji, id: \.self) { item in
-                    Button(item) {
-                        onSelect(item)
-                    }
-                    .font(.system(size: 32))
-                    .frame(width: 42, height: 42)
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(14)
-        }
-        .frame(height: 230)
-        .background(Color(uiColor: .secondarySystemBackground))
     }
 }

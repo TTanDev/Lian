@@ -6,7 +6,6 @@ import SwiftUI
 @Observable
 final class AppState {
     var selectedSection: AppSection = .chat
-    var isDockHidden = false
     var theme: AppTheme = .system
     var startupError: String?
 

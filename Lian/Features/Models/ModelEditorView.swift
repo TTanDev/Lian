@@ -2,7 +2,6 @@ import SwiftUI
 import UIKit
 
 struct ModelEditorView: View {
-    @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
     let model: APIModel?
     let onSave: () -> Void
@@ -45,23 +44,11 @@ struct ModelEditorView: View {
             }
         }
         .navigationTitle(model == nil ? "添加模型" : "编辑模型")
-        .navigationBarBackButtonHidden(model != nil)
+        .toolbar(.hidden, for: .tabBar)
         .toolbar {
-            if let model {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("返回", systemImage: "chevron.left") {
-                        appState.isDockHidden = false
-                        dismiss()
-                    }
-                    .labelStyle(.iconOnly)
-                    .accessibilityLabel("返回\(model.displayName)")
-                }
-            } else {
+            if model == nil {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") {
-                        appState.isDockHidden = false
-                        dismiss()
-                    }
+                    Button("关闭") { dismiss() }
                 }
             }
             ToolbarItemGroup(placement: .confirmationAction) {
@@ -73,15 +60,7 @@ struct ModelEditorView: View {
                 Button("保存") { save() }.disabled(!canSave || !isDirty)
             }
         }
-        .onAppear {
-            appState.isDockHidden = true
-            populate()
-        }
-        .onDisappear {
-            if model == nil {
-                appState.isDockHidden = false
-            }
-        }
+        .onAppear(perform: populate)
         .alert("模型", isPresented: .constant(resultMessage != nil)) {
             Button("好") { resultMessage = nil }
         } message: {
@@ -156,7 +135,6 @@ struct ModelEditorView: View {
             try AppRepository.shared.saveModel(value)
             try KeychainStore.saveAPIKey(apiKey, modelID: value.id)
             onSave()
-            appState.isDockHidden = false
             dismiss()
         } catch {
             resultMessage = error.localizedDescription

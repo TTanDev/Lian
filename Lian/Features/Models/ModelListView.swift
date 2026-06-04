@@ -51,6 +51,7 @@ struct ModelListView: View {
                 Text(errorMessage ?? "")
             }
         }
+        .background(NavigationTabBarCoordinator().frame(width: 0, height: 0))
     }
 
     private func load() {

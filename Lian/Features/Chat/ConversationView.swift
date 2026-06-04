@@ -10,9 +10,10 @@ struct ConversationView: View {
     @State private var draft = ""
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var pendingImageData: Data?
-    @State private var showingAttachmentMenu = false
     @State private var showingCamera = false
     @State private var sending = false
+    @State private var outgoingText = ""
+    @State private var outgoingTextIsFlying = false
     @State private var errorMessage: String?
     @FocusState private var inputFocused: Bool
 
@@ -28,11 +29,6 @@ struct ConversationView: View {
                         }
                         MessageBubble(message: message)
                             .id(message.id)
-                            .transition(
-                                .offset(y: 72)
-                                    .combined(with: .scale(scale: 0.88, anchor: .bottomTrailing))
-                                    .combined(with: .opacity)
-                            )
                     }
                     if sending {
                         HStack {
@@ -42,15 +38,20 @@ struct ConversationView: View {
                         }
                         .padding(.horizontal)
                     }
+                    Color.clear
+                        .frame(height: 1)
+                        .id("conversation-bottom")
                 }
                 .padding(.horizontal)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
-                .animation(.spring(response: 0.42, dampingFraction: 0.82), value: messages.count)
             }
             .scrollDismissesKeyboard(.interactively)
             .defaultScrollAnchor(.bottom)
             .onChange(of: messages.count) {
+                scrollToBottom(proxy)
+            }
+            .onChange(of: sending) {
                 scrollToBottom(proxy)
             }
             .onChange(of: inputFocused) {
@@ -94,10 +95,6 @@ struct ConversationView: View {
 
     private var inputBar: some View {
         VStack(spacing: 8) {
-            if showingAttachmentMenu {
-                attachmentMenu
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
             if let pendingImageData, let image = UIImage(data: pendingImageData) {
                 HStack {
                     Image(uiImage: image)
@@ -117,21 +114,52 @@ struct ConversationView: View {
                 .padding(.horizontal)
             }
             HStack(alignment: .bottom, spacing: 10) {
-                Button("更多", systemImage: showingAttachmentMenu ? "xmark" : "plus") {
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
-                        showingAttachmentMenu.toggle()
+                Menu {
+                    Button("相机", systemImage: "camera.fill") {
+                        showingCamera = true
+                    }
+                    .disabled(selectedModel?.supportsImages != true)
+                    PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                        Label("照片", systemImage: "photo.on.rectangle")
+                    }
+                    .disabled(selectedModel?.supportsImages != true)
+                } label: {
+                    Image(systemName: "plus")
+                        .frame(width: 42, height: 42)
+                        .background(.thinMaterial, in: Circle())
+                }
+                .accessibilityLabel("添加附件")
+
+                ZStack(alignment: .leading) {
+                    TextField("说点什么…", text: $draft, axis: .vertical)
+                        .focused($inputFocused)
+                        .lineLimit(1...5)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
+                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    if !outgoingText.isEmpty {
+                        Text(outgoingText)
+                            .lineLimit(1)
+                            .padding(.horizontal, 14)
+                            .offset(y: outgoingTextIsFlying ? -58 : 0)
+                            .scaleEffect(outgoingTextIsFlying ? 0.92 : 1, anchor: .leading)
+                            .opacity(outgoingTextIsFlying ? 0 : 1)
+                            .allowsHitTesting(false)
                     }
                 }
-                .labelStyle(.iconOnly)
-                .frame(width: 42, height: 42)
-                .background(.thinMaterial, in: Circle())
-
-                TextField("说点什么…", text: $draft, axis: .vertical)
-                    .focused($inputFocused)
-                    .lineLimit(1...5)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 11)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                Menu {
+                    ForEach(presetEmoji, id: \.self) { emoji in
+                        Button(emoji) {
+                            draft += emoji
+                            inputFocused = true
+                        }
+                    }
+                } label: {
+                    Image(systemName: "face.smiling")
+                        .frame(width: 42, height: 42)
+                        .background(.thinMaterial, in: Circle())
+                }
+                .accessibilityLabel("快捷表情")
                 Button("发送", systemImage: "arrow.up.circle.fill") {
                     send()
                 }
@@ -142,49 +170,6 @@ struct ConversationView: View {
             .padding(.horizontal)
             .padding(.vertical, 10)
         }
-    }
-
-    private var attachmentMenu: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                AttachmentAction(title: "相机", symbol: "camera.fill", enabled: selectedModel?.supportsImages == true) {
-                    showingCamera = true
-                    showingAttachmentMenu = false
-                }
-                PhotosPicker(selection: $selectedPhoto, matching: .images) {
-                    AttachmentActionLabel(title: "照片", symbol: "photo.on.rectangle", enabled: selectedModel?.supportsImages == true)
-                }
-                .disabled(selectedModel?.supportsImages != true)
-            }
-            Divider()
-            Text("快捷表情")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(presetEmoji, id: \.self) { emoji in
-                        Button(emoji) {
-                            draft += emoji
-                            showingAttachmentMenu = false
-                            inputFocused = true
-                        }
-                        .font(emoji.count == 1 ? .title2 : .subheadline)
-                        .padding(.horizontal, 12)
-                        .frame(height: 40)
-                        .background(.quaternary, in: Capsule())
-                    }
-                }
-            }
-            if selectedModel?.supportsImages != true {
-                Label("当前角色使用的模型未开启图片能力", systemImage: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(16)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .shadow(color: .black.opacity(0.12), radius: 20, y: 8)
-        .padding(.horizontal)
     }
 
     private func shouldShowDateHeader(at index: Int) -> Bool {
@@ -203,7 +188,6 @@ struct ConversationView: View {
 
     private func loadSelectedPhoto() {
         guard let selectedPhoto else { return }
-        showingAttachmentMenu = false
         Task {
             do {
                 pendingImageData = try await selectedPhoto.loadTransferable(type: Data.self)
@@ -219,14 +203,25 @@ struct ConversationView: View {
             return
         }
         sending = true
-        showingAttachmentMenu = false
         let content = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         let imageData = pendingImageData
-        withAnimation(.easeOut(duration: 0.18)) {
+        if !content.isEmpty {
+            outgoingText = content
+            outgoingTextIsFlying = false
             draft = ""
-            pendingImageData = nil
-            selectedPhoto = nil
+            withAnimation(.easeOut(duration: 0.32)) {
+                outgoingTextIsFlying = true
+            }
+            Task {
+                try? await Task.sleep(for: .milliseconds(340))
+                outgoingText = ""
+                outgoingTextIsFlying = false
+            }
+        } else {
+            draft = ""
         }
+        pendingImageData = nil
+        selectedPhoto = nil
 
         Task {
             do {
@@ -244,9 +239,7 @@ struct ConversationView: View {
                     content: content,
                     attachmentPaths: paths
                 )
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
-                    messages.append(userMessage)
-                }
+                messages.append(userMessage)
 
                 let prompt = PromptBuilder.chat(character: character, messages: messages)
                 let rawReply = try await ChatAPIClient().reply(
@@ -261,9 +254,7 @@ struct ConversationView: View {
                     role: .assistant,
                     content: cleanReply.isEmpty ? "我不知道该怎么回你。" : cleanReply
                 )
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
-                    messages.append(assistantMessage)
-                }
+                messages.append(assistantMessage)
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -272,39 +263,13 @@ struct ConversationView: View {
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        guard let id = messages.last?.id else { return }
-        withAnimation(.snappy(duration: 0.28)) {
-            proxy.scrollTo(id, anchor: .bottom)
+        Task { @MainActor in
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(80))
+            withAnimation(.easeOut(duration: 0.24)) {
+                proxy.scrollTo("conversation-bottom", anchor: .bottom)
+            }
         }
-    }
-}
-
-private struct AttachmentAction: View {
-    let title: String
-    let symbol: String
-    let enabled: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            AttachmentActionLabel(title: title, symbol: symbol, enabled: enabled)
-        }
-        .disabled(!enabled)
-    }
-}
-
-private struct AttachmentActionLabel: View {
-    let title: String
-    let symbol: String
-    let enabled: Bool
-
-    var body: some View {
-        Label(title, systemImage: symbol)
-            .font(.headline)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .opacity(enabled ? 1 : 0.4)
     }
 }
 

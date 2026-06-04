@@ -32,6 +32,7 @@ struct ProfileView: View {
                 }
             }
             .navigationTitle("我的")
+            .toolbar(.visible, for: .tabBar)
             .task { load() }
         }
     }

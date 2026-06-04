@@ -38,6 +38,7 @@ struct LearningCenterView: View {
                 }
             }
             .navigationTitle("学习")
+            .toolbar(.visible, for: .tabBar)
             .toolbar {
                 Button("添加资料", systemImage: "plus") {
                     showingEditor = true

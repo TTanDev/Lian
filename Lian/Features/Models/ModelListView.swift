@@ -36,6 +36,7 @@ struct ModelListView: View {
                 }
             }
             .navigationTitle("模型")
+            .toolbar(.visible, for: .tabBar)
             .toolbar {
                 Button("添加", systemImage: "plus") { showingEditor = true }
             }

@@ -33,6 +33,7 @@ struct CharacterListView: View {
                 }
             }
             .navigationTitle("角色")
+            .toolbar(.visible, for: .tabBar)
             .toolbar {
                 Button("添加", systemImage: "plus") {
                     showingEditor = true
@@ -76,14 +77,7 @@ private struct CharacterCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
-                Circle()
-                    .fill(.pink.gradient)
-                    .frame(width: 58, height: 58)
-                    .overlay {
-                        Text(character.name.prefix(1))
-                            .font(.title2.bold())
-                            .foregroundStyle(.white)
-                    }
+                CharacterAvatar(character: character, size: 58)
                 Spacer()
                 Image(systemName: "slider.horizontal.3")
                     .foregroundStyle(.secondary)

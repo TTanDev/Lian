@@ -1,4 +1,6 @@
+import PhotosUI
 import SwiftUI
+import UIKit
 
 struct CharacterEditorView: View {
     @Environment(\.dismiss) private var dismiss
@@ -14,6 +16,9 @@ struct CharacterEditorView: View {
     @State private var speechStyle = ""
     @State private var triggers = ""
     @State private var modelID = ""
+    @State private var avatarPath: String?
+    @State private var avatarImage: UIImage?
+    @State private var avatarItem: PhotosPickerItem?
     @State private var models: [APIModel] = []
     @State private var original = Draft.empty
     @State private var showingDiscardConfirmation = false
@@ -21,6 +26,36 @@ struct CharacterEditorView: View {
 
     var body: some View {
         Form {
+            Section("头像") {
+                HStack(spacing: 16) {
+                    Group {
+                        if let avatarImage {
+                            Image(uiImage: avatarImage)
+                                .resizable()
+                                .scaledToFill()
+                        } else {
+                            Circle()
+                                .fill(.pink.gradient)
+                                .overlay {
+                                    Text(name.isEmpty ? "角" : String(name.prefix(1)))
+                                        .font(.title.bold())
+                                        .foregroundStyle(.white)
+                                }
+                        }
+                    }
+                    .frame(width: 72, height: 72)
+                    .clipShape(Circle())
+                    PhotosPicker(selection: $avatarItem, matching: .images) {
+                        Label("选择头像", systemImage: "photo")
+                    }
+                    if avatarPath != nil {
+                        Button("恢复默认", role: .destructive) {
+                            avatarPath = nil
+                            avatarImage = nil
+                        }
+                    }
+                }
+            }
             Section("基本信息") {
                 TextField("名字", text: $name)
                 TextField("简介", text: $summary, axis: .vertical)
@@ -73,6 +108,9 @@ struct CharacterEditorView: View {
             }
         }
         .onAppear(perform: populate)
+        .onChange(of: avatarItem) {
+            loadAvatar()
+        }
         .confirmationDialog("确定放弃尚未保存的更改？", isPresented: $showingDiscardConfirmation, titleVisibility: .visible) {
             Button("放弃更改", role: .destructive) {
                 apply(original)
@@ -96,7 +134,8 @@ struct CharacterEditorView: View {
             memories: memories,
             speechStyle: speechStyle,
             triggers: triggers,
-            modelID: modelID
+            modelID: modelID,
+            avatarPath: avatarPath
         )
     }
 
@@ -118,7 +157,8 @@ struct CharacterEditorView: View {
                 memories: $0.sharedMemories,
                 speechStyle: $0.speechStyle,
                 triggers: $0.triggers,
-                modelID: $0.modelID ?? ""
+                modelID: $0.modelID ?? "",
+                avatarPath: $0.avatarPath
             )
         } ?? .empty
         original = value
@@ -135,6 +175,8 @@ struct CharacterEditorView: View {
         speechStyle = value.speechStyle
         triggers = value.triggers
         modelID = value.modelID
+        avatarPath = value.avatarPath
+        avatarImage = loadImage(path: value.avatarPath)
     }
 
     private func save() {
@@ -144,7 +186,7 @@ struct CharacterEditorView: View {
                 CharacterProfile(
                     id: character?.id ?? UUID().uuidString,
                     name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                    avatarPath: character?.avatarPath,
+                    avatarPath: avatarPath,
                     chatBackgroundPath: character?.chatBackgroundPath,
                     summary: summary,
                     mood: mood,
@@ -164,6 +206,42 @@ struct CharacterEditorView: View {
             errorMessage = error.localizedDescription
         }
     }
+
+    private func loadAvatar() {
+        guard let avatarItem else { return }
+        Task {
+            do {
+                guard let data = try await avatarItem.loadTransferable(type: Data.self),
+                      let image = UIImage(data: data) else {
+                    throw ChatAPIError.server("无法读取所选头像")
+                }
+                let store = try AttachmentStore()
+                avatarPath = try await store.importImageData(
+                    data,
+                    attachmentID: "avatar-\(character?.id ?? UUID().uuidString)"
+                )
+                avatarImage = image
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func loadImage(path: String?) -> UIImage? {
+        guard let path, !path.isEmpty else { return nil }
+        if let url = URL(string: path), url.isFileURL {
+            return UIImage(contentsOfFile: url.path)
+        }
+        guard let support = try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        ) else {
+            return nil
+        }
+        return UIImage(contentsOfFile: support.appending(path: path).path)
+    }
 }
 
 private struct Draft: Equatable {
@@ -176,6 +254,7 @@ private struct Draft: Equatable {
     var speechStyle: String
     var triggers: String
     var modelID: String
+    var avatarPath: String?
 
     static let empty = Draft(
         name: "",
@@ -186,6 +265,7 @@ private struct Draft: Equatable {
         memories: "",
         speechStyle: "",
         triggers: "",
-        modelID: ""
+        modelID: "",
+        avatarPath: nil
     )
 }

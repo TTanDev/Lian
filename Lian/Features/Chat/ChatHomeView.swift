@@ -12,14 +12,7 @@ struct ChatHomeView: View {
                     ConversationView(character: character)
                 } label: {
                     HStack(spacing: 14) {
-                        Circle()
-                            .fill(.pink.gradient)
-                            .frame(width: 52, height: 52)
-                            .overlay {
-                                Text(character.name.prefix(1))
-                                    .font(.title3.bold())
-                                    .foregroundStyle(.white)
-                            }
+                        CharacterAvatar(character: character, size: 52)
                         VStack(alignment: .leading, spacing: 5) {
                             Text(character.name).font(.headline)
                             Text(lastChatText(character))
@@ -39,6 +32,7 @@ struct ChatHomeView: View {
                 }
             }
             .navigationTitle("聊天")
+            .toolbar(.visible, for: .tabBar)
             .task { load() }
             .refreshable { load() }
             .alert("读取失败", isPresented: .constant(errorMessage != nil)) {

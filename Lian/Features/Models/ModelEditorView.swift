@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ModelEditorView: View {
     @Environment(\.dismiss) private var dismiss
@@ -123,7 +124,22 @@ struct ModelEditorView: View {
         }
     }
 
-    private static let visionTestImage = Data(base64Encoded:
-        "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAEf/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABAf/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPxB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPxB//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxB//9k="
-    )!
+    private static var visionTestImage: Data {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 256, height: 256))
+        let image = renderer.image { context in
+            UIColor.systemPink.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 128, height: 256))
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 128, y: 0, width: 128, height: 256))
+            let text = "LIAN" as NSString
+            text.draw(
+                at: CGPoint(x: 69, y: 106),
+                withAttributes: [
+                    .font: UIFont.boldSystemFont(ofSize: 36),
+                    .foregroundColor: UIColor.white
+                ]
+            )
+        }
+        return image.jpegData(compressionQuality: 0.9)!
+    }
 }

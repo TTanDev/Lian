@@ -181,7 +181,7 @@ final class AppRepository: @unchecked Sendable {
     func learningSources() throws -> [LearningSource] {
         try database.rows("SELECT * FROM learning_sources ORDER BY created_at DESC").map { row in
             let sourceID = text(row, "id")
-            LearningSource(
+            return LearningSource(
                 id: sourceID,
                 characterID: text(row, "character_id"),
                 modelID: optional(row, "model_id") ?? "",

@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 
 struct CharacterEditorView: View {
+    @Environment(NavigationRouter.self) private var router
     @Environment(\.dismiss) private var dismiss
     let character: CharacterProfile?
     let onSave: () -> Void
@@ -83,14 +84,13 @@ struct CharacterEditorView: View {
             }
             if let character {
                 Section("主动消息") {
-                    NavigationLink("定时主动消息") {
-                        ProactiveMessageSchedulerView(character: character)
+                    Button("定时主动消息") {
+                        router.push(ProactiveMessageSchedulerView(character: character))
                     }
                 }
             }
         }
         .navigationTitle(character == nil ? "新角色" : "编辑角色")
-        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             if character == nil {
                 ToolbarItem(placement: .cancellationAction) {

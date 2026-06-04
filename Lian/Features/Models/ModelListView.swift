@@ -1,16 +1,17 @@
 import SwiftUI
 
 struct ModelListView: View {
+    @Environment(NavigationRouter.self) private var router
     @State private var models: [APIModel] = []
     @State private var showingEditor = false
     @State private var errorMessage: String?
 
     var body: some View {
-        NavigationStack {
+        Group {
             List {
                 ForEach(models) { model in
-                    NavigationLink {
-                        ModelEditorView(model: model) { load() }
+                    Button {
+                        router.push(ModelEditorView(model: model) { load() })
                     } label: {
                         VStack(alignment: .leading, spacing: 5) {
                             HStack {
@@ -27,6 +28,7 @@ struct ModelListView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    .buttonStyle(.plain)
                 }
                 .onDelete(perform: delete)
             }
@@ -51,7 +53,6 @@ struct ModelListView: View {
                 Text(errorMessage ?? "")
             }
         }
-        .background(NavigationTabBarCoordinator().frame(width: 0, height: 0))
     }
 
     private func load() {

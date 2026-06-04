@@ -44,7 +44,6 @@ struct ModelEditorView: View {
             }
         }
         .navigationTitle(model == nil ? "添加模型" : "编辑模型")
-        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             if model == nil {
                 ToolbarItem(placement: .cancellationAction) {

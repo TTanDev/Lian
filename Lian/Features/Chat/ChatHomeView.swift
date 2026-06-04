@@ -1,15 +1,16 @@
 import SwiftUI
 
 struct ChatHomeView: View {
+    @Environment(NavigationRouter.self) private var router
     @State private var characters: [CharacterProfile] = []
     @State private var latestMessageDates: [String: Date] = [:]
     @State private var errorMessage: String?
 
     var body: some View {
-        NavigationStack {
+        Group {
             List(characters) { character in
-                NavigationLink {
-                    ConversationView(character: character)
+                Button {
+                    router.push(ConversationView(character: character))
                 } label: {
                     HStack(spacing: 14) {
                         CharacterAvatar(character: character, size: 52)
@@ -21,6 +22,7 @@ struct ChatHomeView: View {
                         }
                     }
                 }
+                .buttonStyle(.plain)
             }
             .overlay {
                 if characters.isEmpty {
@@ -40,7 +42,6 @@ struct ChatHomeView: View {
                 Text(errorMessage ?? "")
             }
         }
-        .background(NavigationTabBarCoordinator().frame(width: 0, height: 0))
     }
 
     private func lastChatText(_ character: CharacterProfile) -> String {

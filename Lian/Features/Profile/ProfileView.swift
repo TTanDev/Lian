@@ -9,7 +9,7 @@ struct ProfileView: View {
     var body: some View {
         @Bindable var appState = appState
 
-        NavigationStack {
+        Group {
             List {
                 Section("数据") {
                     LabeledContent("角色", value: "\(characterCount)")
@@ -48,7 +48,6 @@ struct ProfileView: View {
             .navigationTitle("我的")
             .task { load() }
         }
-        .background(NavigationTabBarCoordinator().frame(width: 0, height: 0))
     }
 
     private func load() {

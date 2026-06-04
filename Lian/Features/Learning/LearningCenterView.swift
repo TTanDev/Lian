@@ -7,7 +7,7 @@ struct LearningCenterView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        NavigationStack {
+        Group {
             List {
                 ForEach(charactersWithSources) { character in
                     Section {
@@ -56,7 +56,6 @@ struct LearningCenterView: View {
                 Text(errorMessage ?? "")
             }
         }
-        .background(NavigationTabBarCoordinator().frame(width: 0, height: 0))
     }
 
     private var charactersWithSources: [CharacterProfile] {

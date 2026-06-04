@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct CharacterListView: View {
+    @Environment(NavigationRouter.self) private var router
     @State private var characters: [CharacterProfile] = []
     @State private var showingEditor = false
     @State private var errorMessage: String?
@@ -8,12 +9,12 @@ struct CharacterListView: View {
     private let columns = [GridItem(.adaptive(minimum: 156), spacing: 14)]
 
     var body: some View {
-        NavigationStack {
+        Group {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 14) {
                     ForEach(characters) { character in
-                        NavigationLink {
-                            CharacterEditorView(character: character) { load() }
+                        Button {
+                            router.push(CharacterEditorView(character: character) { load() })
                         } label: {
                             CharacterCard(character: character)
                         }
@@ -50,7 +51,6 @@ struct CharacterListView: View {
                 Text(errorMessage ?? "")
             }
         }
-        .background(NavigationTabBarCoordinator().frame(width: 0, height: 0))
     }
 
     private func load() {

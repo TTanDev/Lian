@@ -65,7 +65,6 @@ struct ConversationView: View {
         }
         .navigationTitle(character.name)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             inputBar
                 .background(.ultraThinMaterial)

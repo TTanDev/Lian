@@ -3,6 +3,7 @@ DerivedData/
 build/
 *.ipa
 Lian-unsigned.ipa
+/VIdeo/
 LOG/
 *.xcuserstate
 xcuserdata/

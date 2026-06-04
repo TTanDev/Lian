@@ -8,28 +8,8 @@ struct RootView: View {
         @Bindable var appState = appState
 
         ZStack {
-            TabView(selection: $appState.selectedSection) {
-                LearningCenterView()
-                    .tabItem { Label(AppSection.learning.title, systemImage: AppSection.learning.symbol) }
-                    .tag(AppSection.learning)
-
-                CharacterListView()
-                    .tabItem { Label(AppSection.characters.title, systemImage: AppSection.characters.symbol) }
-                    .tag(AppSection.characters)
-
-                ChatHomeView()
-                    .tabItem { Label(AppSection.chat.title, systemImage: AppSection.chat.symbol) }
-                    .tag(AppSection.chat)
-
-                ModelListView()
-                    .tabItem { Label(AppSection.models.title, systemImage: AppSection.models.symbol) }
-                    .tag(AppSection.models)
-
-                ProfileView()
-                    .tabItem { Label(AppSection.profile.title, systemImage: AppSection.profile.symbol) }
-                    .tag(AppSection.profile)
-            }
-            .tint(.pink)
+            NativeTabContainer(appState: appState)
+                .ignoresSafeArea()
 
             if showingSplash {
                 SplashView()
@@ -63,24 +43,63 @@ struct RootView: View {
 }
 
 private struct SplashView: View {
-    @State private var appeared = false
+    @State private var curtainsMeet = false
+    @State private var iconAppeared = false
 
     var body: some View {
         ZStack {
             Color(uiColor: .systemBackground).ignoresSafeArea()
+            WaterCurtain(colors: [.pink.opacity(0.08), .pink.opacity(0.9), .white.opacity(0.8)])
+                .rotationEffect(.degrees(curtainsMeet ? 42 : 8))
+                .offset(x: curtainsMeet ? -26 : -320, y: curtainsMeet ? -12 : -180)
+                .blur(radius: curtainsMeet ? 3 : 14)
+                .opacity(iconAppeared ? 0 : 1)
+            WaterCurtain(colors: [.teal.opacity(0.08), .teal.opacity(0.9), .white.opacity(0.8)])
+                .rotationEffect(.degrees(curtainsMeet ? -42 : -8))
+                .offset(x: curtainsMeet ? 26 : 320, y: curtainsMeet ? 12 : 180)
+                .blur(radius: curtainsMeet ? 3 : 14)
+                .opacity(iconAppeared ? 0 : 1)
             Image("SplashIcon")
                 .resizable()
                 .scaledToFit()
-                .frame(width: 150, height: 150)
-                .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
-                .shadow(color: .pink.opacity(appeared ? 0.24 : 0), radius: appeared ? 26 : 4)
-                .scaleEffect(appeared ? 1 : 0.9)
-                .opacity(appeared ? 1 : 0)
+                .frame(width: 190, height: 190)
+                .clipShape(RoundedRectangle(cornerRadius: 42, style: .continuous))
+                .shadow(color: .pink.opacity(iconAppeared ? 0.18 : 0), radius: 24)
+                .scaleEffect(iconAppeared ? 1 : 0.78)
+                .opacity(iconAppeared ? 1 : 0)
         }
         .onAppear {
-            withAnimation(.easeOut(duration: 0.55)) {
-                appeared = true
+            withAnimation(.spring(response: 0.78, dampingFraction: 0.82)) {
+                curtainsMeet = true
+            }
+            Task {
+                try? await Task.sleep(for: .milliseconds(620))
+                withAnimation(.easeInOut(duration: 0.32)) {
+                    iconAppeared = true
+                }
             }
         }
+    }
+}
+
+private struct WaterCurtain: View {
+    let colors: [Color]
+
+    var body: some View {
+        Capsule()
+            .fill(
+                LinearGradient(
+                    colors: colors,
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .frame(width: 410, height: 92)
+            .overlay {
+                Capsule()
+                    .stroke(.white.opacity(0.55), lineWidth: 2)
+                    .blur(radius: 1)
+            }
+            .shadow(color: colors[1].opacity(0.35), radius: 22)
     }
 }

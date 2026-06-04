@@ -34,8 +34,8 @@ enum KeychainStore {
     private static func query(account: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
-            kSecService as String: "com.ttan.exchat.native",
-            kSecAccount as String: account
+            kSecAttrService as String: "com.ttan.exchat.native",
+            kSecAttrAccount as String: account
         ]
     }
 }

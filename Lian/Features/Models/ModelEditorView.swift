@@ -25,9 +25,11 @@ struct ModelEditorView: View {
                     .textInputAutocapitalization(.never)
                 SecureField("API Key", text: $apiKey)
             }
-            Section("能力") {
+            Section {
                 Toggle("支持图片", isOn: $supportsImages)
                 Toggle("设为默认模型", isOn: $isDefault)
+            } header: {
+                Text("能力")
             } footer: {
                 Text("图片开关只控制新图片的选择与发送，不影响历史图片显示。")
             }

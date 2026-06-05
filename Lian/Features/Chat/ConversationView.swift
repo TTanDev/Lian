@@ -16,10 +16,8 @@ struct ConversationView: View {
     @State private var showingCamera = false
     @State private var quotedMessage: ChatMessage?
     @State private var sending = false
-    @State private var previewItem: ImagePreviewItem?
     @State private var errorMessage: String?
     @FocusState private var inputFocused: Bool
-    @Namespace private var previewNamespace
 
     var body: some View {
         ZStack {
@@ -32,10 +30,6 @@ struct ConversationView: View {
                             }
                             MessageBubble(
                                 message: message,
-                                namespace: previewNamespace,
-                                onPreview: { attachments, index in
-                                    previewItem = previewItem(for: attachments, startIndex: index)
-                                },
                                 onRetry: { retryReply(for: message) }
                             ) {
                                 quotedMessage = message
@@ -75,21 +69,8 @@ struct ConversationView: View {
                 }
                 .onChange(of: inputFocused) {
                     guard inputFocused else { return }
-                    withAnimation(.snappy(duration: 0.28)) {
-                        scrollToBottom(proxy)
-                    }
+                    scrollToBottom(proxy)
                 }
-            }
-        }
-        .overlay {
-            if let previewItem {
-                ImagePreviewView(
-                    item: previewItem,
-                    namespace: previewNamespace,
-                    onDismiss: { self.previewItem = nil }
-                )
-                .transition(.opacity)
-                .zIndex(50)
             }
         }
         .navigationTitle(character.name)
@@ -158,11 +139,7 @@ struct ConversationView: View {
                                     .resizable()
                                     .scaledToFill()
                                     .frame(width: 58, height: 58)
-                                    .matchedPreview(id: "pending-\(index)", namespace: previewNamespace)
                                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                    .onTapGesture {
-                                        previewItem = pendingPreviewItem(startIndex: index)
-                                    }
                                     .overlay(alignment: .topTrailing) {
                                         Button("移除", systemImage: "xmark.circle.fill") {
                                             pendingImageData.remove(at: index)
@@ -222,10 +199,16 @@ struct ConversationView: View {
 
     private func load() {
         do {
-            messages = try AppRepository.shared.messages(characterID: character.id)
-            models = try AppRepository.shared.models()
-            learnedSources = try AppRepository.shared.learningSources().filter { $0.characterID == character.id }
-            contextSnapshot = try AppRepository.shared.latestContextSnapshot(characterID: character.id)
+            let loadedMessages = try AppRepository.shared.messages(characterID: character.id)
+            let loadedModels = try AppRepository.shared.models()
+            let loadedSources = try AppRepository.shared.learningSources().filter { $0.characterID == character.id }
+            let loadedSnapshot = try AppRepository.shared.latestContextSnapshot(characterID: character.id)
+            withNoAnimation {
+                messages = loadedMessages
+                models = loadedModels
+                learnedSources = loadedSources
+                contextSnapshot = loadedSnapshot
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -285,7 +268,9 @@ struct ConversationView: View {
                     content: content,
                     attachmentPaths: paths
                 )
-                messages.append(userMessage)
+                withNoAnimation {
+                    messages.append(userMessage)
+                }
 
                 let prompt = PromptBuilder.chat(
                     character: character,
@@ -305,7 +290,9 @@ struct ConversationView: View {
                     role: .assistant,
                     content: cleanReply.isEmpty ? "我不知道该怎么回你。" : cleanReply
                 )
-                messages.append(assistantMessage)
+                withNoAnimation {
+                    messages.append(assistantMessage)
+                }
             } catch {
                 try? AppRepository.shared.updateMessageReplyStatus(id: messageID, status: .failed)
                 load()
@@ -319,7 +306,9 @@ struct ConversationView: View {
         Task { @MainActor in
             await Task.yield()
             try? await Task.sleep(for: .milliseconds(80))
-            withAnimation(.easeOut(duration: 0.24)) {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
                 proxy.scrollTo("conversation-bottom", anchor: .bottom)
             }
         }
@@ -357,7 +346,9 @@ struct ConversationView: View {
                     content: cleanReply.isEmpty ? "我不知道该怎么回你。" : cleanReply
                 )
                 try AppRepository.shared.updateMessageReplyStatus(id: message.id, status: nil)
-                messages.append(assistantMessage)
+                withNoAnimation {
+                    messages.append(assistantMessage)
+                }
                 load()
             } catch {
                 try? AppRepository.shared.updateMessageReplyStatus(id: message.id, status: .failed)
@@ -367,25 +358,6 @@ struct ConversationView: View {
         }
     }
 
-    private func previewItem(for attachments: [ChatAttachment], startIndex: Int) -> ImagePreviewItem? {
-        let images = attachments.compactMap { attachment -> PreviewImage? in
-            guard let image = UIImage(contentsOfFile: attachment.fileURL(in: applicationSupportDirectory).path) else {
-                return nil
-            }
-            return PreviewImage(id: attachment.id, image: image)
-        }
-        guard !images.isEmpty else { return nil }
-        return ImagePreviewItem(images: images, startIndex: startIndex)
-    }
-
-    private func pendingPreviewItem(startIndex: Int) -> ImagePreviewItem? {
-        let images = pendingImageData.enumerated().compactMap { pair in
-            UIImage(data: pair.element).map { PreviewImage(id: "pending-\(pair.offset)", image: $0) }
-        }
-        guard !images.isEmpty else { return nil }
-        return ImagePreviewItem(images: images, startIndex: startIndex)
-    }
-
     private var applicationSupportDirectory: URL {
         (try? FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -393,6 +365,12 @@ struct ConversationView: View {
             appropriateFor: nil,
             create: true
         )) ?? FileManager.default.temporaryDirectory
+    }
+
+    private func withNoAnimation(_ updates: () -> Void) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction, updates)
     }
 }
 
@@ -445,8 +423,6 @@ private struct ContextSnapshotDivider: View {
 
 private struct MessageBubble: View {
     let message: ChatMessage
-    let namespace: Namespace.ID
-    let onPreview: ([ChatAttachment], Int) -> Void
     let onRetry: () -> Void
     let onReply: () -> Void
 
@@ -457,16 +433,10 @@ private struct MessageBubble: View {
             if isUser { Spacer(minLength: 54) }
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(message.attachments) { attachment in
-                    if let index = message.attachments.firstIndex(of: attachment) {
-                        AttachmentRenderer(
-                            attachment: attachment,
-                            applicationSupportDirectory: applicationSupportDirectory
-                        )
-                        .matchedPreview(id: attachment.id, namespace: namespace)
-                        .onTapGesture {
-                            onPreview(message.attachments, index)
-                        }
-                    }
+                    AttachmentRenderer(
+                        attachment: attachment,
+                        applicationSupportDirectory: applicationSupportDirectory
+                    )
                 }
                 if !message.content.isEmpty {
                     Text(message.content)

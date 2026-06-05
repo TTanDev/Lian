@@ -384,8 +384,8 @@ struct ConversationView: View {
     }
 
     private func pendingPreviewItem(startIndex: Int) -> ImagePreviewItem? {
-        let images = pendingImageData.enumerated().compactMap {
-            UIImage(data: $0.element).map { PreviewImage(id: "pending-\($0.offset)", image: $0) }
+        let images = pendingImageData.enumerated().compactMap { pair in
+            UIImage(data: pair.element).map { PreviewImage(id: "pending-\(pair.offset)", image: $0) }
         }
         guard !images.isEmpty else { return nil }
         return ImagePreviewItem(images: images, startIndex: startIndex)

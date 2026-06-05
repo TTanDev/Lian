@@ -8,6 +8,10 @@ struct ChatMessage: Identifiable, Hashable, Sendable {
         case imported
     }
 
+    enum ReplyStatus: String, Sendable {
+        case failed
+    }
+
     let id: String
     let characterID: String
     let role: Role
@@ -15,5 +19,6 @@ struct ChatMessage: Identifiable, Hashable, Sendable {
     let createdAt: Date
     let delayNote: String?
     let sticker: String?
+    let replyStatus: ReplyStatus?
     let attachments: [ChatAttachment]
 }

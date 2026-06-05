@@ -107,6 +107,7 @@ final class AppRepository: @unchecked Sendable {
                 createdAt: date(row, "created_at"),
                 delayNote: optional(row, "delay_note"),
                 sticker: optional(row, "sticker"),
+                replyStatus: optional(row, "reply_status").flatMap(ChatMessage.ReplyStatus.init(rawValue:)),
                 attachments: try attachments(messageID: messageID)
             )
         }
@@ -126,16 +127,21 @@ final class AppRepository: @unchecked Sendable {
         characterID: String,
         role: ChatMessage.Role,
         content: String,
-        attachmentPaths: [String] = []
+        attachmentPaths: [String] = [],
+        createdAt: Date = Date(),
+        replyStatus: ChatMessage.ReplyStatus? = nil
     ) throws -> ChatMessage {
-        let now = Date()
+        let now = createdAt
         let messageID = id
         var attachments: [ChatAttachment] = []
 
         try database.transaction {
             try database.run(
-                "INSERT INTO chat_messages (id, character_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
-                values: [.text(messageID), .text(characterID), .text(role.rawValue), .text(content), .integer(now.milliseconds)]
+                "INSERT INTO chat_messages (id, character_id, role, content, created_at, reply_status) VALUES (?, ?, ?, ?, ?, ?)",
+                values: [
+                    .text(messageID), .text(characterID), .text(role.rawValue), .text(content),
+                    .integer(now.milliseconds), optionalText(replyStatus?.rawValue)
+                ]
             )
             for path in attachmentPaths {
                 let attachment = ChatAttachment(
@@ -174,7 +180,15 @@ final class AppRepository: @unchecked Sendable {
             createdAt: now,
             delayNote: nil,
             sticker: nil,
+            replyStatus: replyStatus,
             attachments: attachments
+        )
+    }
+
+    func updateMessageReplyStatus(id: String, status: ChatMessage.ReplyStatus?) throws {
+        try database.run(
+            "UPDATE chat_messages SET reply_status = ? WHERE id = ?",
+            values: [optionalText(status?.rawValue), .text(id)]
         )
     }
 

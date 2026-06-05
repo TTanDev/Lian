@@ -55,6 +55,12 @@ final class DatabaseClient: @unchecked Sendable {
                 "INSERT INTO schema_migrations(version, applied_at) VALUES (3, \(Int(Date().timeIntervalSince1970 * 1000)));"
             )
         }
+        if !appliedVersions.contains(4) {
+            try execute(DatabaseSchema.migrationV4)
+            try execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (4, \(Int(Date().timeIntervalSince1970 * 1000)));"
+            )
+        }
         try execute(
             "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, \(Int(Date().timeIntervalSince1970 * 1000)));"
         )

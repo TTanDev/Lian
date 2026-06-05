@@ -1,9 +1,13 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct CharacterListView: View {
     @Environment(NavigationRouter.self) private var router
     @State private var characters: [CharacterProfile] = []
     @State private var showingEditor = false
+    @State private var exportingDocument: LianRoleDocument?
+    @State private var exportName = "LianRole"
+    @State private var importing = false
     @State private var errorMessage: String?
 
     private let columns = [GridItem(.adaptive(minimum: 156), spacing: 14)]
@@ -20,6 +24,9 @@ struct CharacterListView: View {
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
+                            Button("导出角色", systemImage: "square.and.arrow.up") {
+                                export(character)
+                            }
                             Button("删除角色", systemImage: "trash", role: .destructive) {
                                 delete(character)
                             }
@@ -35,8 +42,17 @@ struct CharacterListView: View {
             }
             .navigationTitle("角色")
             .toolbar {
-                Button("添加", systemImage: "plus") {
-                    showingEditor = true
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button("添加角色", systemImage: "plus") {
+                            showingEditor = true
+                        }
+                        Button("导入角色", systemImage: "square.and.arrow.down") {
+                            importing = true
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                    }
                 }
             }
             .sheet(isPresented: $showingEditor) {
@@ -45,6 +61,26 @@ struct CharacterListView: View {
                 }
             }
             .task { load() }
+            .fileExporter(
+                isPresented: Binding(
+                    get: { exportingDocument != nil },
+                    set: { if !$0 { exportingDocument = nil } }
+                ),
+                document: exportingDocument,
+                contentType: .data,
+                defaultFilename: "\(exportName).lianrole"
+            ) { result in
+                if case let .failure(error) = result {
+                    errorMessage = error.localizedDescription
+                }
+            }
+            .fileImporter(
+                isPresented: $importing,
+                allowedContentTypes: [.data, .json],
+                allowsMultipleSelection: false
+            ) { result in
+                importRole(result)
+            }
             .alert("操作失败", isPresented: .constant(errorMessage != nil)) {
                 Button("好") { errorMessage = nil }
             } message: {
@@ -67,6 +103,35 @@ struct CharacterListView: View {
             load()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func export(_ character: CharacterProfile) {
+        do {
+            exportingDocument = try CharacterArchiveService.export(character: character)
+            exportName = character.name.isEmpty ? "LianRole" : character.name
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func importRole(_ result: Result<[URL], Error>) {
+        Task {
+            do {
+                let url = try result.get().first
+                guard let url else { return }
+                let access = url.startAccessingSecurityScopedResource()
+                defer {
+                    if access {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+                let document = LianRoleDocument(data: try Data(contentsOf: url))
+                try await CharacterArchiveService.import(document: document)
+                load()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 }

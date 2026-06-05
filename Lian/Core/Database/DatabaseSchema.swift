@@ -1,7 +1,7 @@
 import Foundation
 
 enum DatabaseSchema {
-    static let version = 3
+    static let version = 4
 
     static let migrationV1 = """
     PRAGMA foreign_keys = ON;
@@ -143,5 +143,9 @@ enum DatabaseSchema {
       WHERE local_path IS NOT NULL AND local_path != '';
 
     UPDATE learning_sources SET status = 'failed' WHERE status = 'pending';
+    """
+
+    static let migrationV4 = """
+    ALTER TABLE chat_messages ADD COLUMN reply_status TEXT;
     """
 }

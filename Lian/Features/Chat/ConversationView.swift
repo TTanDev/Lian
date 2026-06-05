@@ -16,6 +16,7 @@ struct ConversationView: View {
     @State private var quotedMessage: ChatMessage?
     @State private var sending = false
     @State private var animatedMessageID: String?
+    @State private var previewItem: ImagePreviewItem?
     @State private var errorMessage: String?
     @FocusState private var inputFocused: Bool
 
@@ -29,7 +30,11 @@ struct ConversationView: View {
                         }
                         MessageBubble(
                             message: message,
-                            animatedMessageID: animatedMessageID
+                            animatedMessageID: animatedMessageID,
+                            onPreview: { attachments, index in
+                                previewItem = previewItem(for: attachments, startIndex: index)
+                            },
+                            onRetry: { retryReply(for: message) }
                         ) {
                             quotedMessage = message
                             inputFocused = true
@@ -89,6 +94,9 @@ struct ConversationView: View {
         .onChange(of: selectedPhotos) {
             loadSelectedPhotos()
         }
+        .fullScreenCover(item: $previewItem) { item in
+            ImagePreviewView(item: item)
+        }
         .alert("聊天失败", isPresented: .constant(errorMessage != nil)) {
             Button("好") { errorMessage = nil }
         } message: {
@@ -134,6 +142,9 @@ struct ConversationView: View {
                                     .scaledToFill()
                                     .frame(width: 58, height: 58)
                                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                    .onTapGesture {
+                                        previewItem = pendingPreviewItem(startIndex: index)
+                                    }
                                     .overlay(alignment: .topTrailing) {
                                         Button("移除", systemImage: "xmark.circle.fill") {
                                             pendingImageData.remove(at: index)
@@ -282,6 +293,8 @@ struct ConversationView: View {
                 messages.append(assistantMessage)
             } catch {
                 animatedMessageID = nil
+                try? AppRepository.shared.updateMessageReplyStatus(id: messageID, status: .failed)
+                load()
                 errorMessage = error.localizedDescription
             }
             sending = false
@@ -296,6 +309,73 @@ struct ConversationView: View {
                 proxy.scrollTo("conversation-bottom", anchor: .bottom)
             }
         }
+    }
+
+    private func retryReply(for message: ChatMessage) {
+        guard message.role == .user, message.replyStatus == .failed else { return }
+        guard let model = selectedModel else {
+            errorMessage = "请先在模型页添加模型"
+            return
+        }
+        sending = true
+        Task {
+            do {
+                let imageData = try message.attachments.map { attachment in
+                    try Data(contentsOf: attachment.fileURL(in: applicationSupportDirectory))
+                }
+                let promptMessages = Array(messages.prefix { $0.id != message.id }) + [message]
+                let prompt = PromptBuilder.chat(
+                    character: character,
+                    messages: Array(promptMessages),
+                    learnedSources: learnedSources
+                )
+                let rawReply = try await ChatAPIClient().reply(
+                    model: model,
+                    apiKey: KeychainStore.apiKey(modelID: model.id),
+                    messages: prompt,
+                    latestImageData: imageData
+                )
+                let cleanReply = MessageSanitizer.clean(rawReply)
+                let assistantMessage = try AppRepository.shared.addMessage(
+                    characterID: character.id,
+                    role: .assistant,
+                    content: cleanReply.isEmpty ? "我不知道该怎么回你。" : cleanReply
+                )
+                try AppRepository.shared.updateMessageReplyStatus(id: message.id, status: nil)
+                messages.append(assistantMessage)
+                load()
+            } catch {
+                try? AppRepository.shared.updateMessageReplyStatus(id: message.id, status: .failed)
+                errorMessage = error.localizedDescription
+            }
+            sending = false
+        }
+    }
+
+    private func previewItem(for attachments: [ChatAttachment], startIndex: Int) -> ImagePreviewItem? {
+        let images = attachments.compactMap { attachment -> PreviewImage? in
+            guard let image = UIImage(contentsOfFile: attachment.fileURL(in: applicationSupportDirectory).path) else {
+                return nil
+            }
+            return PreviewImage(image: image)
+        }
+        guard !images.isEmpty else { return nil }
+        return ImagePreviewItem(images: images, startIndex: startIndex)
+    }
+
+    private func pendingPreviewItem(startIndex: Int) -> ImagePreviewItem? {
+        let images = pendingImageData.compactMap { UIImage(data: $0).map(PreviewImage.init(image:)) }
+        guard !images.isEmpty else { return nil }
+        return ImagePreviewItem(images: images, startIndex: startIndex)
+    }
+
+    private var applicationSupportDirectory: URL {
+        (try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )) ?? FileManager.default.temporaryDirectory
     }
 }
 
@@ -337,6 +417,8 @@ private struct TimeDivider: View {
 private struct MessageBubble: View {
     let message: ChatMessage
     let animatedMessageID: String?
+    let onPreview: ([ChatAttachment], Int) -> Void
+    let onRetry: () -> Void
     let onReply: () -> Void
 
     private var isUser: Bool { message.role == .user }
@@ -346,14 +428,25 @@ private struct MessageBubble: View {
             if isUser { Spacer(minLength: 54) }
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(message.attachments) { attachment in
-                    AttachmentRenderer(
-                        attachment: attachment,
-                        applicationSupportDirectory: applicationSupportDirectory
-                    )
+                    if let index = message.attachments.firstIndex(of: attachment) {
+                        AttachmentRenderer(
+                            attachment: attachment,
+                            applicationSupportDirectory: applicationSupportDirectory
+                        )
+                        .onTapGesture {
+                            onPreview(message.attachments, index)
+                        }
+                    }
                 }
                 if !message.content.isEmpty {
                     Text(message.content)
                         .textSelection(.enabled)
+                }
+                if message.replyStatus == .failed {
+                    Button("回复失败，重新生成", systemImage: "arrow.clockwise", action: onRetry)
+                        .font(.caption.bold())
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.red)
                 }
             }
             .padding(.horizontal, 14)

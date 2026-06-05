@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct LearningCenterView: View {
     @State private var sources: [LearningSource] = []
@@ -12,14 +13,23 @@ struct LearningCenterView: View {
             ForEach(charactersWithSources) { character in
                 Section {
                     ForEach(sources.filter { $0.characterID == character.id }) { source in
-                        LearningSourceRow(
-                            source: source,
-                            modelName: models.first(where: { $0.id == source.modelID })?.displayName,
-                            onRetry: { retry(source) }
-                        )
-                        .swipeActions {
-                            Button("删除", systemImage: "trash", role: .destructive) {
-                                delete(source)
+                        NavigationLink {
+                            LearningSourceDetailView(
+                                source: source,
+                                character: character,
+                                model: models.first(where: { $0.id == source.modelID }),
+                                onRetry: { retry(source) }
+                            )
+                        } label: {
+                            LearningSourceRow(
+                                source: source,
+                                modelName: models.first(where: { $0.id == source.modelID })?.displayName,
+                                onRetry: { retry(source) }
+                            )
+                            .swipeActions {
+                                Button("删除", systemImage: "trash", role: .destructive) {
+                                    delete(source)
+                                }
                             }
                         }
                     }
@@ -112,6 +122,116 @@ struct LearningCenterView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+private struct LearningSourceDetailView: View {
+    let source: LearningSource
+    let character: CharacterProfile
+    let model: APIModel?
+    let onRetry: () -> Void
+
+    @State private var previewItem: ImagePreviewItem?
+
+    var body: some View {
+        List {
+            Section("状态") {
+                Label(statusText, systemImage: statusIcon)
+                    .foregroundStyle(statusColor)
+                LabeledContent("角色", value: character.name)
+                LabeledContent("模型", value: model?.displayName ?? "模型已删除")
+                if source.status == .failed {
+                    Button("重新学习", systemImage: "arrow.clockwise", action: onRetry)
+                }
+            }
+
+            if !source.rawText.isEmpty {
+                Section("原始正文") {
+                    Text(source.rawText)
+                        .textSelection(.enabled)
+                }
+            }
+
+            if !source.imagePaths.isEmpty {
+                Section("图片资料") {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 10)], spacing: 10) {
+                        ForEach(Array(source.imagePaths.enumerated()), id: \.offset) { index, path in
+                            if let image = image(path: path) {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(height: 112)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .onTapGesture {
+                                        previewItem = previewItem(startIndex: index)
+                                    }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !source.summary.isEmpty {
+                Section("学习结果") {
+                    Text(source.summary)
+                        .textSelection(.enabled)
+                }
+            }
+
+            if let error = source.errorMessage, source.status == .failed {
+                Section("失败原因") {
+                    Text(error)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .navigationTitle("学习详情")
+        .fullScreenCover(item: $previewItem) { item in
+            ImagePreviewView(item: item)
+        }
+    }
+
+    private var statusText: String {
+        switch source.status {
+        case .learning: "正在学习中，请保持前台运行"
+        case .failed: "学习失败"
+        case .learned: "学习完成"
+        }
+    }
+
+    private var statusIcon: String {
+        switch source.status {
+        case .learning: "brain.head.profile"
+        case .failed: "exclamationmark.triangle.fill"
+        case .learned: "checkmark.circle.fill"
+        }
+    }
+
+    private var statusColor: Color {
+        switch source.status {
+        case .learning: .orange
+        case .failed: .red
+        case .learned: .green
+        }
+    }
+
+    private func previewItem(startIndex: Int) -> ImagePreviewItem? {
+        let images = source.imagePaths.compactMap { image(path: $0).map(PreviewImage.init(image:)) }
+        guard !images.isEmpty else { return nil }
+        return ImagePreviewItem(images: images, startIndex: startIndex)
+    }
+
+    private func image(path: String) -> UIImage? {
+        guard let support = try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        ) else {
+            return nil
+        }
+        return UIImage(contentsOfFile: support.appending(path: path).path)
     }
 }
 

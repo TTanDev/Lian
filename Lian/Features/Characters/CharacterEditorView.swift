@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 import UIKit
 
 struct CharacterEditorView: View {
@@ -30,6 +31,8 @@ struct CharacterEditorView: View {
     @State private var persistedID: String?
     @State private var persistedCreatedAt: Date?
     @State private var showingDiscardConfirmation = false
+    @State private var exportingDocument: LianRoleDocument?
+    @State private var exportName = "LianRole"
     @State private var errorMessage: String?
 
     var body: some View {
@@ -92,9 +95,9 @@ struct CharacterEditorView: View {
             if let character {
                 Section {
                     LabeledContent("消息数", value: "\(messageCount)")
-                    LabeledContent("估算上下文", value: "\(estimatedContextTokens) tokens")
+                    LabeledContent("估算上下文", value: TokenDisplay.ktokens(estimatedContextTokens))
                     if let model = selectedCompressionModel {
-                        LabeledContent("模型窗口", value: "\(model.contextWindowTokens) tokens")
+                        LabeledContent("模型窗口", value: TokenDisplay.ktokens(model.contextWindowTokens))
                     }
                     if let contextSnapshot {
                         LabeledContent("已压缩到", value: contextSnapshot.cutoffCreatedAt.formatted(Date.FormatStyle(date: .numeric, time: .shortened).locale(Locale(identifier: "zh_CN"))))
@@ -115,6 +118,11 @@ struct CharacterEditorView: View {
                 Section("主动消息") {
                     Button("定时主动消息") {
                         router.push(ProactiveMessageSchedulerView(character: character))
+                    }
+                }
+                Section("角色数据") {
+                    Button("导出角色", systemImage: "square.and.arrow.up") {
+                        export(character)
                     }
                 }
             }
@@ -155,6 +163,19 @@ struct CharacterEditorView: View {
             Button("好") { contextMessage = nil }
         } message: {
             Text(contextMessage ?? "")
+        }
+        .fileExporter(
+            isPresented: Binding(
+                get: { exportingDocument != nil },
+                set: { if !$0 { exportingDocument = nil } }
+            ),
+            document: exportingDocument,
+            contentType: .data,
+            defaultFilename: "\(exportName).lianrole"
+        ) { result in
+            if case let .failure(error) = result {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -261,6 +282,15 @@ struct CharacterEditorView: View {
             persistedCreatedAt = createdAt
             onSave()
             original = current
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func export(_ character: CharacterProfile) {
+        do {
+            exportingDocument = try CharacterArchiveService.export(character: character)
+            exportName = character.name.isEmpty ? "LianRole" : character.name
         } catch {
             errorMessage = error.localizedDescription
         }

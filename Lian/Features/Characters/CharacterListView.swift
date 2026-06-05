@@ -5,8 +5,6 @@ struct CharacterListView: View {
     @Environment(NavigationRouter.self) private var router
     @State private var characters: [CharacterProfile] = []
     @State private var showingEditor = false
-    @State private var exportingDocument: LianRoleDocument?
-    @State private var exportName = "LianRole"
     @State private var importing = false
     @State private var errorMessage: String?
 
@@ -24,9 +22,6 @@ struct CharacterListView: View {
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
-                            Button("导出角色", systemImage: "square.and.arrow.up") {
-                                export(character)
-                            }
                             Button("删除角色", systemImage: "trash", role: .destructive) {
                                 delete(character)
                             }
@@ -61,19 +56,6 @@ struct CharacterListView: View {
                 }
             }
             .task { load() }
-            .fileExporter(
-                isPresented: Binding(
-                    get: { exportingDocument != nil },
-                    set: { if !$0 { exportingDocument = nil } }
-                ),
-                document: exportingDocument,
-                contentType: .data,
-                defaultFilename: "\(exportName).lianrole"
-            ) { result in
-                if case let .failure(error) = result {
-                    errorMessage = error.localizedDescription
-                }
-            }
             .fileImporter(
                 isPresented: $importing,
                 allowedContentTypes: [.data, .json],
@@ -101,15 +83,6 @@ struct CharacterListView: View {
         do {
             try AppRepository.shared.deleteCharacter(id: character.id)
             load()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    private func export(_ character: CharacterProfile) {
-        do {
-            exportingDocument = try CharacterArchiveService.export(character: character)
-            exportName = character.name.isEmpty ? "LianRole" : character.name
         } catch {
             errorMessage = error.localizedDescription
         }

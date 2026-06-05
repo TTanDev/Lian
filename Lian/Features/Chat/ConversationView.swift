@@ -16,7 +16,6 @@ struct ConversationView: View {
     @State private var showingCamera = false
     @State private var quotedMessage: ChatMessage?
     @State private var sending = false
-    @State private var animatedMessageID: String?
     @State private var previewItem: ImagePreviewItem?
     @State private var errorMessage: String?
     @FocusState private var inputFocused: Bool
@@ -33,10 +32,11 @@ struct ConversationView: View {
                             }
                             MessageBubble(
                                 message: message,
-                                animatedMessageID: animatedMessageID,
                                 namespace: previewNamespace,
                                 onPreview: { attachments, index in
-                                    previewItem = previewItem(for: attachments, startIndex: index)
+                                    withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+                                        previewItem = previewItem(for: attachments, startIndex: index)
+                                    }
                                 },
                                 onRetry: { retryReply(for: message) }
                             ) {
@@ -63,6 +63,9 @@ struct ConversationView: View {
                     .padding(.horizontal)
                     .padding(.top, 12)
                     .padding(.bottom, 8)
+                    .transaction { transaction in
+                        transaction.animation = nil
+                    }
                 }
                 .scrollDismissesKeyboard(.interactively)
                 .defaultScrollAnchor(.bottom)
@@ -87,15 +90,18 @@ struct ConversationView: View {
                     namespace: previewNamespace,
                     onDismiss: { self.previewItem = nil }
                 )
-                .transition(.opacity)
                 .zIndex(50)
             }
         }
         .navigationTitle(character.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(previewItem == nil ? .visible : .hidden, for: .navigationBar)
+        .statusBarHidden(previewItem != nil)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            inputBar
-                .background(.ultraThinMaterial)
+            if previewItem == nil {
+                inputBar
+                    .background(.ultraThinMaterial)
+            }
         }
         .sheet(isPresented: $showingCamera) {
             CameraPicker { data in
@@ -160,7 +166,9 @@ struct ConversationView: View {
                                     .matchedPreview(id: "pending-\(index)", namespace: previewNamespace)
                                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                                     .onTapGesture {
-                                        previewItem = pendingPreviewItem(startIndex: index)
+                                        withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+                                            previewItem = pendingPreviewItem(startIndex: index)
+                                        }
                                     }
                                     .overlay(alignment: .topTrailing) {
                                         Button("移除", systemImage: "xmark.circle.fill") {
@@ -284,12 +292,7 @@ struct ConversationView: View {
                     content: content,
                     attachmentPaths: paths
                 )
-                animatedMessageID = messageID
-                withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) {
-                    messages.append(userMessage)
-                }
-                try? await Task.sleep(for: .milliseconds(380))
-                animatedMessageID = nil
+                messages.append(userMessage)
 
                 let prompt = PromptBuilder.chat(
                     character: character,
@@ -311,7 +314,6 @@ struct ConversationView: View {
                 )
                 messages.append(assistantMessage)
             } catch {
-                animatedMessageID = nil
                 try? AppRepository.shared.updateMessageReplyStatus(id: messageID, status: .failed)
                 load()
                 errorMessage = error.localizedDescription
@@ -450,7 +452,6 @@ private struct ContextSnapshotDivider: View {
 
 private struct MessageBubble: View {
     let message: ChatMessage
-    let animatedMessageID: String?
     let namespace: Namespace.ID
     let onPreview: ([ChatAttachment], Int) -> Void
     let onRetry: () -> Void
@@ -489,11 +490,6 @@ private struct MessageBubble: View {
             .padding(.vertical, 11)
             .background(isUser ? Color.pink.opacity(0.82) : Color(uiColor: .secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .transition(
-                message.id == animatedMessageID
-                    ? .scale(scale: 0.82, anchor: .bottomTrailing).combined(with: .opacity)
-                    : .identity
-            )
             .contextMenu {
                 Button("引用回复", systemImage: "arrowshape.turn.up.left") {
                     onReply()

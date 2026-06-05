@@ -40,13 +40,30 @@ struct ModelEditorView: View {
                 Text("图片开关只控制新图片的选择与发送，不影响历史图片显示。")
             }
             Section("上下文窗口") {
-                HStack {
-                    Button("128K") { contextWindowTokens = 128_000 }
-                    Button("256K") { contextWindowTokens = 256_000 }
-                    Button("1M") { contextWindowTokens = 1_000_000 }
+                Menu {
+                    ForEach(ContextWindowPreset.allCases) { preset in
+                        Button {
+                            contextWindowTokens = preset.tokens
+                        } label: {
+                            if contextWindowTokens == preset.tokens {
+                                Label(preset.title, systemImage: "checkmark")
+                            } else {
+                                Text(preset.title)
+                            }
+                        }
+                    }
+                } label: {
+                    LabeledContent("上下文窗口") {
+                        HStack(spacing: 4) {
+                            Text(contextWindowTitle)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption.bold())
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
                 }
-                TextField("上下文 tokens", value: $contextWindowTokens, format: .number)
-                    .keyboardType(.numberPad)
+                .buttonStyle(.plain)
             }
             Section {
                 Button(testing ? "测试中…" : "测试连接", systemImage: "network") {
@@ -87,6 +104,10 @@ struct ModelEditorView: View {
 
     private var canSave: Bool {
         !displayName.isEmpty && !baseURL.isEmpty && !modelName.isEmpty && contextWindowTokens > 0
+    }
+
+    private var contextWindowTitle: String {
+        ContextWindowPreset.title(for: contextWindowTokens)
     }
 
     private var current: ModelDraft {
@@ -202,6 +223,27 @@ struct ModelEditorView: View {
             )
         }
         return image.jpegData(compressionQuality: 0.9)!
+    }
+}
+
+private enum ContextWindowPreset: Int, CaseIterable, Identifiable {
+    case k128 = 128_000
+    case k256 = 256_000
+    case k1m = 1_000_000
+
+    var id: Int { rawValue }
+    var tokens: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .k128: "128K"
+        case .k256: "256K"
+        case .k1m: "1M"
+        }
+    }
+
+    static func title(for tokens: Int) -> String {
+        allCases.first { $0.tokens == tokens }?.title ?? TokenDisplay.ktokens(tokens)
     }
 }
 

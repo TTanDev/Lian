@@ -1,7 +1,7 @@
 import Foundation
 
 enum DatabaseSchema {
-    static let version = 4
+    static let version = 5
 
     static let migrationV1 = """
     PRAGMA foreign_keys = ON;
@@ -147,5 +147,26 @@ enum DatabaseSchema {
 
     static let migrationV4 = """
     ALTER TABLE chat_messages ADD COLUMN reply_status TEXT;
+    """
+
+    static let migrationV5 = """
+    ALTER TABLE api_models ADD COLUMN context_window_tokens INTEGER NOT NULL DEFAULT 128000;
+
+    CREATE TABLE IF NOT EXISTS context_snapshots (
+      id TEXT PRIMARY KEY NOT NULL,
+      character_id TEXT NOT NULL,
+      model_id TEXT NOT NULL,
+      cutoff_message_id TEXT NOT NULL,
+      cutoff_created_at INTEGER NOT NULL,
+      summary TEXT NOT NULL,
+      estimated_original_tokens INTEGER NOT NULL DEFAULT 0,
+      estimated_summary_tokens INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (character_id) REFERENCES characters(id) ON DELETE CASCADE,
+      FOREIGN KEY (model_id) REFERENCES api_models(id) ON DELETE SET NULL,
+      FOREIGN KEY (cutoff_message_id) REFERENCES chat_messages(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_context_snapshots_character_created
+      ON context_snapshots(character_id, created_at DESC);
     """
 }

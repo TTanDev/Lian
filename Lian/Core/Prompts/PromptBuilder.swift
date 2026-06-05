@@ -4,7 +4,8 @@ enum PromptBuilder {
     static func chat(
         character: CharacterProfile,
         messages: [ChatMessage],
-        learnedSources: [LearningSource] = []
+        learnedSources: [LearningSource] = [],
+        contextSnapshot: ContextSnapshot? = nil
     ) -> [PromptMessage] {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
@@ -20,11 +21,20 @@ enum PromptBuilder {
         共同记忆：\(character.sharedMemories)
         说话习惯：\(character.speechStyle)
         雷点：\(character.triggers)
+        已压缩上下文：
+        \(contextSnapshot?.summary ?? "无")
         已学习资料：
         \(learnedSources.filter { $0.status == .learned }.map(\.summary).filter { !$0.isEmpty }.joined(separator: "\n\n"))
         """
 
-        return [PromptMessage(role: "system", content: system)] + messages.suffix(30).map {
+        let visibleMessages: [ChatMessage]
+        if let contextSnapshot {
+            visibleMessages = messages.filter { $0.createdAt > contextSnapshot.cutoffCreatedAt }
+        } else {
+            visibleMessages = messages
+        }
+
+        return [PromptMessage(role: "system", content: system)] + visibleMessages.suffix(30).map {
             var content = $0.content
             if !$0.attachments.isEmpty {
                 content += content.isEmpty ? "[用户发送了图片]" : "\n[用户发送了图片]"

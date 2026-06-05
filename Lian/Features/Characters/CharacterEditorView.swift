@@ -21,6 +21,11 @@ struct CharacterEditorView: View {
     @State private var avatarImage: UIImage?
     @State private var avatarItem: PhotosPickerItem?
     @State private var models: [APIModel] = []
+    @State private var contextSnapshot: ContextSnapshot?
+    @State private var messageCount = 0
+    @State private var estimatedContextTokens = 0
+    @State private var compressingContext = false
+    @State private var contextMessage: String?
     @State private var original = Draft.empty
     @State private var persistedID: String?
     @State private var persistedCreatedAt: Date?
@@ -85,6 +90,28 @@ struct CharacterEditorView: View {
                 TextField("雷点与边界", text: $triggers, axis: .vertical)
             }
             if let character {
+                Section {
+                    LabeledContent("消息数", value: "\(messageCount)")
+                    LabeledContent("估算上下文", value: "\(estimatedContextTokens) tokens")
+                    if let model = selectedCompressionModel {
+                        LabeledContent("模型窗口", value: "\(model.contextWindowTokens) tokens")
+                    }
+                    if let contextSnapshot {
+                        LabeledContent("已压缩到", value: contextSnapshot.cutoffCreatedAt.formatted(Date.FormatStyle(date: .numeric, time: .shortened).locale(Locale(identifier: "zh_CN"))))
+                        Text(contextSnapshot.summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                    }
+                    Button(compressingContext ? "压缩中…" : "压缩上下文", systemImage: "archivebox") {
+                        compressContext()
+                    }
+                    .disabled(compressingContext || selectedCompressionModel == nil)
+                } header: {
+                    Text("上下文")
+                } footer: {
+                    Text("压缩不会删除聊天记录，只会生成摘要节点；后续请求只发送摘要和节点之后的完整消息。")
+                }
                 Section("主动消息") {
                     Button("定时主动消息") {
                         router.push(ProactiveMessageSchedulerView(character: character))
@@ -124,6 +151,20 @@ struct CharacterEditorView: View {
         } message: {
             Text(errorMessage ?? "")
         }
+        .alert("上下文", isPresented: .constant(contextMessage != nil)) {
+            Button("好") { contextMessage = nil }
+        } message: {
+            Text(contextMessage ?? "")
+        }
+    }
+
+    private var selectedCompressionModel: APIModel? {
+        let selectedID = modelID.isEmpty ? character?.modelID : modelID
+        if let selectedID, !selectedID.isEmpty,
+           let model = models.first(where: { $0.id == selectedID }) {
+            return model
+        }
+        return models.first(where: \.isDefault) ?? models.first
     }
 
     private var current: Draft {
@@ -146,6 +187,16 @@ struct CharacterEditorView: View {
     private func populate() {
         do {
             models = try AppRepository.shared.models()
+            if let character {
+                let messages = try AppRepository.shared.messages(characterID: character.id)
+                messageCount = messages.count
+                contextSnapshot = try AppRepository.shared.latestContextSnapshot(characterID: character.id)
+                let visibleMessages = contextSnapshot.map { snapshot in
+                    messages.filter { $0.createdAt > snapshot.cutoffCreatedAt }
+                } ?? messages
+                estimatedContextTokens = TokenEstimator.estimate(messages: visibleMessages)
+                    + TokenEstimator.estimate(contextSnapshot?.summary ?? "")
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -212,6 +263,31 @@ struct CharacterEditorView: View {
             original = current
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func compressContext() {
+        guard let character, let model = selectedCompressionModel else { return }
+        compressingContext = true
+        Task {
+            do {
+                let messages = try AppRepository.shared.messages(characterID: character.id)
+                let snapshot = try await ContextCompressionService.compress(
+                    character: character,
+                    model: model,
+                    messages: messages,
+                    existingSnapshot: try AppRepository.shared.latestContextSnapshot(characterID: character.id)
+                )
+                try AppRepository.shared.saveContextSnapshot(snapshot)
+                contextSnapshot = snapshot
+                let visibleMessages = messages.filter { $0.createdAt > snapshot.cutoffCreatedAt }
+                estimatedContextTokens = TokenEstimator.estimate(messages: visibleMessages)
+                    + TokenEstimator.estimate(snapshot.summary)
+                contextMessage = "上下文已压缩"
+            } catch {
+                contextMessage = error.localizedDescription
+            }
+            compressingContext = false
         }
     }
 

@@ -217,7 +217,9 @@ private struct LearningSourceDetailView: View {
     }
 
     private func previewItem(startIndex: Int) -> ImagePreviewItem? {
-        let images = source.imagePaths.compactMap { image(path: $0).map(PreviewImage.init(image:)) }
+        let images = source.imagePaths.enumerated().compactMap { index, path in
+            image(path: path).map { PreviewImage(id: "learning-\(source.id)-\(index)", image: $0) }
+        }
         guard !images.isEmpty else { return nil }
         return ImagePreviewItem(images: images, startIndex: startIndex)
     }

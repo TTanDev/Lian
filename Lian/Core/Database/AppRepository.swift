@@ -54,17 +54,20 @@ final class AppRepository: @unchecked Sendable {
             try database.run(
                 """
                 INSERT INTO api_models (
-                  id, display_name, base_url, model_name, supports_images, is_default, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                  id, display_name, base_url, model_name, supports_images, is_default,
+                  context_window_tokens, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   display_name = excluded.display_name, base_url = excluded.base_url,
                   model_name = excluded.model_name, supports_images = excluded.supports_images,
-                  is_default = excluded.is_default, updated_at = excluded.updated_at
+                  is_default = excluded.is_default, context_window_tokens = excluded.context_window_tokens,
+                  updated_at = excluded.updated_at
                 """,
                 values: [
                     .text(model.id), .text(model.displayName), .text(model.baseURL),
                     .text(model.modelName), .integer(model.supportsImages ? 1 : 0),
-                    .integer(model.isDefault ? 1 : 0), .integer(model.createdAt.milliseconds),
+                    .integer(model.isDefault ? 1 : 0), .integer(Int64(model.contextWindowTokens)),
+                    .integer(model.createdAt.milliseconds),
                     .integer(model.updatedAt.milliseconds)
                 ]
             )
@@ -189,6 +192,35 @@ final class AppRepository: @unchecked Sendable {
         try database.run(
             "UPDATE chat_messages SET reply_status = ? WHERE id = ?",
             values: [optionalText(status?.rawValue), .text(id)]
+        )
+    }
+
+    func latestContextSnapshot(characterID: String) throws -> ContextSnapshot? {
+        try database.rows(
+            """
+            SELECT * FROM context_snapshots
+            WHERE character_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            values: [.text(characterID)]
+        ).first.map(mapContextSnapshot)
+    }
+
+    func saveContextSnapshot(_ snapshot: ContextSnapshot) throws {
+        try database.run(
+            """
+            INSERT INTO context_snapshots (
+              id, character_id, model_id, cutoff_message_id, cutoff_created_at, summary,
+              estimated_original_tokens, estimated_summary_tokens, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            values: [
+                .text(snapshot.id), .text(snapshot.characterID), .text(snapshot.modelID),
+                .text(snapshot.cutoffMessageID), .integer(snapshot.cutoffCreatedAt.milliseconds),
+                .text(snapshot.summary), .integer(Int64(snapshot.estimatedOriginalTokens)),
+                .integer(Int64(snapshot.estimatedSummaryTokens)), .integer(snapshot.createdAt.milliseconds)
+            ]
         )
     }
 
@@ -384,8 +416,23 @@ final class AppRepository: @unchecked Sendable {
             modelName: text(row, "model_name"),
             supportsImages: row["supports_images"]?.int64 == 1,
             isDefault: row["is_default"]?.int64 == 1,
+            contextWindowTokens: Int(row["context_window_tokens"]?.int64 ?? 128_000),
             createdAt: date(row, "created_at"),
             updatedAt: date(row, "updated_at")
+        )
+    }
+
+    private func mapContextSnapshot(_ row: [String: SQLiteValue]) -> ContextSnapshot {
+        ContextSnapshot(
+            id: text(row, "id"),
+            characterID: text(row, "character_id"),
+            modelID: text(row, "model_id"),
+            cutoffMessageID: text(row, "cutoff_message_id"),
+            cutoffCreatedAt: date(row, "cutoff_created_at"),
+            summary: text(row, "summary"),
+            estimatedOriginalTokens: Int(row["estimated_original_tokens"]?.int64 ?? 0),
+            estimatedSummaryTokens: Int(row["estimated_summary_tokens"]?.int64 ?? 0),
+            createdAt: date(row, "created_at")
         )
     }
 

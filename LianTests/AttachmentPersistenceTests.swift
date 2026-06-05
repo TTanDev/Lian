@@ -12,6 +12,7 @@ struct AttachmentPersistenceTests {
             modelName: "text-model",
             supportsImages: false,
             isDefault: true,
+            contextWindowTokens: 128_000,
             createdAt: .now,
             updatedAt: .now
         )

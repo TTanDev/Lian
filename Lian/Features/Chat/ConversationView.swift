@@ -8,6 +8,7 @@ struct ConversationView: View {
     @State private var messages: [ChatMessage] = []
     @State private var models: [APIModel] = []
     @State private var learnedSources: [LearningSource] = []
+    @State private var contextSnapshot: ContextSnapshot?
     @State private var draft = ""
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var pendingImageData: [Data] = []
@@ -19,57 +20,75 @@ struct ConversationView: View {
     @State private var previewItem: ImagePreviewItem?
     @State private var errorMessage: String?
     @FocusState private var inputFocused: Bool
+    @Namespace private var previewNamespace
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 14) {
-                    ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
-                        if shouldShowTimeHeader(at: index) {
-                            TimeDivider(date: message.createdAt)
-                        }
-                        MessageBubble(
-                            message: message,
-                            animatedMessageID: animatedMessageID,
-                            onPreview: { attachments, index in
-                                previewItem = previewItem(for: attachments, startIndex: index)
-                            },
-                            onRetry: { retryReply(for: message) }
-                        ) {
-                            quotedMessage = message
-                            inputFocused = true
-                        }
+        ZStack {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 14) {
+                        ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+                            if shouldShowTimeHeader(at: index) {
+                                TimeDivider(date: message.createdAt)
+                            }
+                            MessageBubble(
+                                message: message,
+                                animatedMessageID: animatedMessageID,
+                                namespace: previewNamespace,
+                                onPreview: { attachments, index in
+                                    previewItem = previewItem(for: attachments, startIndex: index)
+                                },
+                                onRetry: { retryReply(for: message) }
+                            ) {
+                                quotedMessage = message
+                                inputFocused = true
+                            }
                             .id(message.id)
-                    }
-                    if sending {
-                        HStack {
-                            ProgressView()
-                            Text("正在回复…").foregroundStyle(.secondary)
-                            Spacer()
+                            if contextSnapshot?.cutoffMessageID == message.id {
+                                ContextSnapshotDivider()
+                            }
                         }
-                        .padding(.horizontal)
+                        if sending {
+                            HStack {
+                                ProgressView()
+                                Text("正在回复…").foregroundStyle(.secondary)
+                                Spacer()
+                            }
+                            .padding(.horizontal)
+                        }
+                        Color.clear
+                            .frame(height: 1)
+                            .id("conversation-bottom")
                     }
-                    Color.clear
-                        .frame(height: 1)
-                        .id("conversation-bottom")
+                    .padding(.horizontal)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
                 }
-                .padding(.horizontal)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .defaultScrollAnchor(.bottom)
-            .onChange(of: messages.count) {
-                scrollToBottom(proxy)
-            }
-            .onChange(of: sending) {
-                scrollToBottom(proxy)
-            }
-            .onChange(of: inputFocused) {
-                guard inputFocused else { return }
-                withAnimation(.snappy(duration: 0.28)) {
+                .scrollDismissesKeyboard(.interactively)
+                .defaultScrollAnchor(.bottom)
+                .onChange(of: messages.count) {
                     scrollToBottom(proxy)
                 }
+                .onChange(of: sending) {
+                    scrollToBottom(proxy)
+                }
+                .onChange(of: inputFocused) {
+                    guard inputFocused else { return }
+                    withAnimation(.snappy(duration: 0.28)) {
+                        scrollToBottom(proxy)
+                    }
+                }
+            }
+        }
+        .overlay {
+            if let previewItem {
+                ImagePreviewView(
+                    item: previewItem,
+                    namespace: previewNamespace,
+                    onDismiss: { self.previewItem = nil }
+                )
+                .transition(.opacity)
+                .zIndex(50)
             }
         }
         .navigationTitle(character.name)
@@ -93,9 +112,6 @@ struct ConversationView: View {
         .task { load() }
         .onChange(of: selectedPhotos) {
             loadSelectedPhotos()
-        }
-        .fullScreenCover(item: $previewItem) { item in
-            ImagePreviewView(item: item)
         }
         .alert("聊天失败", isPresented: .constant(errorMessage != nil)) {
             Button("好") { errorMessage = nil }
@@ -141,6 +157,7 @@ struct ConversationView: View {
                                     .resizable()
                                     .scaledToFill()
                                     .frame(width: 58, height: 58)
+                                    .matchedPreview(id: "pending-\(index)", namespace: previewNamespace)
                                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                                     .onTapGesture {
                                         previewItem = pendingPreviewItem(startIndex: index)
@@ -207,6 +224,7 @@ struct ConversationView: View {
             messages = try AppRepository.shared.messages(characterID: character.id)
             models = try AppRepository.shared.models()
             learnedSources = try AppRepository.shared.learningSources().filter { $0.characterID == character.id }
+            contextSnapshot = try AppRepository.shared.latestContextSnapshot(characterID: character.id)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -276,7 +294,8 @@ struct ConversationView: View {
                 let prompt = PromptBuilder.chat(
                     character: character,
                     messages: messages,
-                    learnedSources: learnedSources
+                    learnedSources: learnedSources,
+                    contextSnapshot: contextSnapshot
                 )
                 let rawReply = try await ChatAPIClient().reply(
                     model: model,
@@ -327,7 +346,8 @@ struct ConversationView: View {
                 let prompt = PromptBuilder.chat(
                     character: character,
                     messages: Array(promptMessages),
-                    learnedSources: learnedSources
+                    learnedSources: learnedSources,
+                    contextSnapshot: contextSnapshot
                 )
                 let rawReply = try await ChatAPIClient().reply(
                     model: model,
@@ -357,14 +377,16 @@ struct ConversationView: View {
             guard let image = UIImage(contentsOfFile: attachment.fileURL(in: applicationSupportDirectory).path) else {
                 return nil
             }
-            return PreviewImage(image: image)
+            return PreviewImage(id: attachment.id, image: image)
         }
         guard !images.isEmpty else { return nil }
         return ImagePreviewItem(images: images, startIndex: startIndex)
     }
 
     private func pendingPreviewItem(startIndex: Int) -> ImagePreviewItem? {
-        let images = pendingImageData.compactMap { UIImage(data: $0).map(PreviewImage.init(image:)) }
+        let images = pendingImageData.enumerated().compactMap {
+            UIImage(data: $0.element).map { PreviewImage(id: "pending-\($0.offset)", image: $0) }
+        }
         guard !images.isEmpty else { return nil }
         return ImagePreviewItem(images: images, startIndex: startIndex)
     }
@@ -414,9 +436,22 @@ private struct TimeDivider: View {
     }
 }
 
+private struct ContextSnapshotDivider: View {
+    var body: some View {
+        Label("此前对话已压缩为上下文摘要，历史消息仍可查看", systemImage: "archivebox")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Color(uiColor: .tertiarySystemBackground), in: Capsule())
+            .padding(.vertical, 2)
+    }
+}
+
 private struct MessageBubble: View {
     let message: ChatMessage
     let animatedMessageID: String?
+    let namespace: Namespace.ID
     let onPreview: ([ChatAttachment], Int) -> Void
     let onRetry: () -> Void
     let onReply: () -> Void
@@ -433,6 +468,7 @@ private struct MessageBubble: View {
                             attachment: attachment,
                             applicationSupportDirectory: applicationSupportDirectory
                         )
+                        .matchedPreview(id: attachment.id, namespace: namespace)
                         .onTapGesture {
                             onPreview(message.attachments, index)
                         }

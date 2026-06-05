@@ -20,7 +20,10 @@ struct ChatHomeView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
+                        Spacer(minLength: 0)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }

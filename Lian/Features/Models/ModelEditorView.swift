@@ -12,6 +12,7 @@ struct ModelEditorView: View {
     @State private var apiKey = ""
     @State private var supportsImages = false
     @State private var isDefault = true
+    @State private var contextWindowTokens = 128_000
     @State private var testing = false
     @State private var resultMessage: String?
     @State private var original = ModelDraft.empty
@@ -37,6 +38,15 @@ struct ModelEditorView: View {
                 Text("能力")
             } footer: {
                 Text("图片开关只控制新图片的选择与发送，不影响历史图片显示。")
+            }
+            Section("上下文窗口") {
+                HStack {
+                    Button("128K") { contextWindowTokens = 128_000 }
+                    Button("256K") { contextWindowTokens = 256_000 }
+                    Button("1M") { contextWindowTokens = 1_000_000 }
+                }
+                TextField("上下文 tokens", value: $contextWindowTokens, format: .number)
+                    .keyboardType(.numberPad)
             }
             Section {
                 Button(testing ? "测试中…" : "测试连接", systemImage: "network") {
@@ -76,7 +86,7 @@ struct ModelEditorView: View {
     }
 
     private var canSave: Bool {
-        !displayName.isEmpty && !baseURL.isEmpty && !modelName.isEmpty
+        !displayName.isEmpty && !baseURL.isEmpty && !modelName.isEmpty && contextWindowTokens > 0
     }
 
     private var current: ModelDraft {
@@ -86,7 +96,8 @@ struct ModelEditorView: View {
             modelName: modelName,
             apiKey: apiKey,
             supportsImages: supportsImages,
-            isDefault: isDefault
+            isDefault: isDefault,
+            contextWindowTokens: contextWindowTokens
         )
     }
 
@@ -100,7 +111,8 @@ struct ModelEditorView: View {
                 modelName: $0.modelName,
                 apiKey: KeychainStore.apiKey(modelID: $0.id),
                 supportsImages: $0.supportsImages,
-                isDefault: $0.isDefault
+                isDefault: $0.isDefault,
+                contextWindowTokens: $0.contextWindowTokens
             )
         } ?? .empty
         original = value
@@ -116,6 +128,7 @@ struct ModelEditorView: View {
         apiKey = value.apiKey
         supportsImages = value.supportsImages
         isDefault = value.isDefault
+        contextWindowTokens = value.contextWindowTokens
     }
 
     private func draft() -> APIModel {
@@ -127,6 +140,7 @@ struct ModelEditorView: View {
             modelName: modelName,
             supportsImages: supportsImages,
             isDefault: isDefault,
+            contextWindowTokens: contextWindowTokens <= 0 ? 128_000 : contextWindowTokens,
             createdAt: persistedCreatedAt ?? now,
             updatedAt: now
         )
@@ -198,6 +212,7 @@ private struct ModelDraft: Equatable {
     var apiKey: String
     var supportsImages: Bool
     var isDefault: Bool
+    var contextWindowTokens: Int
 
     static let empty = ModelDraft(
         displayName: "",
@@ -205,6 +220,7 @@ private struct ModelDraft: Equatable {
         modelName: "",
         apiKey: "",
         supportsImages: false,
-        isDefault: true
+        isDefault: true,
+        contextWindowTokens: 128_000
     )
 }

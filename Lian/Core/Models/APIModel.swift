@@ -7,6 +7,7 @@ struct APIModel: Identifiable, Hashable, Sendable {
     var modelName: String
     var supportsImages: Bool
     var isDefault: Bool
+    var contextWindowTokens: Int
     let createdAt: Date
     var updatedAt: Date
 

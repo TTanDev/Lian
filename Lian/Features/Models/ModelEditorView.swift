@@ -19,6 +19,8 @@ struct ModelEditorView: View {
     @State private var persistedID: String?
     @State private var persistedCreatedAt: Date?
     @State private var showingDiscardConfirmation = false
+    @State private var showingCustomContextWindow = false
+    @State private var customContextWindowText = ""
 
     var body: some View {
         Form {
@@ -40,20 +42,26 @@ struct ModelEditorView: View {
                 Text("图片开关只控制新图片的选择与发送，不影响历史图片显示。")
             }
             Section("上下文窗口") {
-                Menu {
-                    ForEach(ContextWindowPreset.allCases) { preset in
-                        Button {
-                            contextWindowTokens = preset.tokens
-                        } label: {
-                            if contextWindowTokens == preset.tokens {
-                                Label(preset.title, systemImage: "checkmark")
-                            } else {
-                                Text(preset.title)
+                HStack {
+                    Text("上下文窗口")
+                    Spacer()
+                    Menu {
+                        ForEach(ContextWindowPreset.allCases) { preset in
+                            Button {
+                                contextWindowTokens = preset.tokens
+                            } label: {
+                                if contextWindowTokens == preset.tokens {
+                                    Label(preset.title, systemImage: "checkmark")
+                                } else {
+                                    Text(preset.title)
+                                }
                             }
                         }
-                    }
-                } label: {
-                    LabeledContent("上下文窗口") {
+                        Button("自定义") {
+                            customContextWindowText = "\(contextWindowTokens)"
+                            showingCustomContextWindow = true
+                        }
+                    } label: {
                         HStack(spacing: 4) {
                             Text(contextWindowTitle)
                             Image(systemName: "chevron.up.chevron.down")
@@ -61,9 +69,8 @@ struct ModelEditorView: View {
                         }
                         .foregroundStyle(.secondary)
                     }
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
             Section {
                 Button(testing ? "测试中…" : "测试连接", systemImage: "network") {
@@ -99,6 +106,16 @@ struct ModelEditorView: View {
                 apply(original)
             }
             Button("继续编辑", role: .cancel) {}
+        }
+        .alert("自定义上下文窗口", isPresented: $showingCustomContextWindow) {
+            TextField("tokens", text: $customContextWindowText)
+                .keyboardType(.numberPad)
+            Button("取消", role: .cancel) {}
+            Button("确定") {
+                applyCustomContextWindow()
+            }
+        } message: {
+            Text("请输入模型上下文窗口的 token 数。")
         }
     }
 
@@ -181,6 +198,15 @@ struct ModelEditorView: View {
         }
     }
 
+    private func applyCustomContextWindow() {
+        let digits = customContextWindowText.filter(\.isNumber)
+        guard let value = Int(digits), value > 0 else {
+            resultMessage = "请输入有效的上下文 token 数"
+            return
+        }
+        contextWindowTokens = value
+    }
+
     private func testConnection() {
         testing = true
         Task {
@@ -227,9 +253,9 @@ struct ModelEditorView: View {
 }
 
 private enum ContextWindowPreset: Int, CaseIterable, Identifiable {
-    case k128 = 128_000
-    case k256 = 256_000
     case k1m = 1_000_000
+    case k256 = 256_000
+    case k128 = 128_000
 
     var id: Int { rawValue }
     var tokens: Int { rawValue }

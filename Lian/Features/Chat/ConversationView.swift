@@ -34,9 +34,7 @@ struct ConversationView: View {
                                 message: message,
                                 namespace: previewNamespace,
                                 onPreview: { attachments, index in
-                                    withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
-                                        previewItem = previewItem(for: attachments, startIndex: index)
-                                    }
+                                    previewItem = previewItem(for: attachments, startIndex: index)
                                 },
                                 onRetry: { retryReply(for: message) }
                             ) {
@@ -90,18 +88,15 @@ struct ConversationView: View {
                     namespace: previewNamespace,
                     onDismiss: { self.previewItem = nil }
                 )
+                .transition(.opacity)
                 .zIndex(50)
             }
         }
         .navigationTitle(character.name)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(previewItem == nil ? .visible : .hidden, for: .navigationBar)
-        .statusBarHidden(previewItem != nil)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if previewItem == nil {
-                inputBar
-                    .background(.ultraThinMaterial)
-            }
+            inputBar
+                .background(.ultraThinMaterial)
         }
         .sheet(isPresented: $showingCamera) {
             CameraPicker { data in
@@ -166,9 +161,7 @@ struct ConversationView: View {
                                     .matchedPreview(id: "pending-\(index)", namespace: previewNamespace)
                                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                                     .onTapGesture {
-                                        withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
-                                            previewItem = pendingPreviewItem(startIndex: index)
-                                        }
+                                        previewItem = pendingPreviewItem(startIndex: index)
                                     }
                                     .overlay(alignment: .topTrailing) {
                                         Button("移除", systemImage: "xmark.circle.fill") {
